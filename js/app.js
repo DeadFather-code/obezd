@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -1233,13 +1233,8 @@ function onMarkerClick(id) {
     return;
   }
 
-  const status = getStatus(store);
-  if (status.due) {
-    setStoreVisited(id, true);
-    showSnackbar('Визит отмечен: ' + store.name, 'Отменить', () => {
-      setStoreVisited(id, false);
-    });
-  }
+  /* Тап по точке только открывает карточку. Визит отмечается кнопкой
+     «Отметить визит» внутри карточки, чтобы не менять статус случайно. */
   highlightMarker(id);
   openStoreSheet(id);
 }

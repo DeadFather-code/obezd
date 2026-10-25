@@ -1,5 +1,5 @@
 /* Service worker: офлайн-оболочка приложения */
-const CACHE_NAME = 'obezd-56a77b41e3';
+const CACHE_NAME = 'obezd-df22d1dab4';
 
 const LOD1 = [];
 for (let row = 0; row < 8; row += 1) {
