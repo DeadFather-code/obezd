@@ -246,7 +246,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.4</span></p>
+            <p>Версия <span id="app-version">2.5</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на зелёный кружок, чтобы отметить визит: он сразу станет красным.</p>
@@ -387,6 +387,11 @@
   <div class="modal-card">
     <h3 id="modal-title">Подтверждение</h3>
     <p id="modal-text"></p>
+    <div id="modal-pass" class="modal-pass hidden">
+      <label class="modal-pass-label" for="modal-pass-input">Пароль</label>
+      <input id="modal-pass-input" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Введите пароль">
+      <p id="modal-pass-error" class="modal-pass-error hidden">Неверный пароль. Попробуйте ещё раз.</p>
+    </div>
     <div class="modal-actions">
       <button id="modal-cancel" type="button">Отмена</button>
       <button id="modal-ok" class="primary" type="button">ОК</button>

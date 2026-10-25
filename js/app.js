@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -15,6 +15,11 @@ const PERIOD_MAX = 365;
 const ROUTE_NAMES = ['Ливны1', 'Ливны2', 'Залегощь', 'Карачев', 'Мценск', 'Кромы', 'Болхов'];
 const ORYOL_ROUTE = 'Орёл';
 const DAY_MS = 86400000;
+const COMMENT_MAX = 1000;
+
+/* Пароль на опасные действия в настройках. Это защита от случайного
+   нажатия, а не криптография: значение лежит в коде приложения. */
+const RESET_PASSWORD_B64 = 'U2hhZG93MzIxNjc=';
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyCokb4BRjQZoRh4Y0XuPU3AjEBudZi_I-o',
@@ -57,7 +62,8 @@ function emptyState() {
     visits: {},
     hidden: {},
     custom: {},
-    overrides: {}
+    overrides: {},
+    comments: {}
   };
 }
 
@@ -72,7 +78,9 @@ let allStores = [];
 let seedsLoaded = false;
 
 let map = null;
-let clusterLayer = null;
+/* Две независимые группы кластеров: просроченные и посещённые точки
+   никогда не объединяются в один общий кружок. */
+let clusterLayers = null;
 let tileLight = null;
 let localBaseLayer = null;
 let localLayers = null;
@@ -109,7 +117,7 @@ let cloud = {
   online: false,
   failed: false,
   hasPushed: false,
-  pushed: { visits: {}, hidden: {}, custom: {}, overrides: {}, settings: null }
+  pushed: { visits: {}, hidden: {}, custom: {}, overrides: {}, comments: {}, settings: null }
 };
 let pushTimer = null;
 let pushInFlight = false;
@@ -242,6 +250,21 @@ function sanitizeVisits(raw) {
   return out;
 }
 
+function sanitizeComments(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [id, value] of Object.entries(raw)) {
+    if (!id || !value || typeof value !== 'object') continue;
+    const text = String(value.text != null ? value.text : '').replace(/\r\n/g, '\n').slice(0, COMMENT_MAX);
+    const upd = toNumber(value.upd);
+    out[id] = {
+      text: text.trim(),
+      upd: upd && upd > 0 ? upd : Date.now()
+    };
+  }
+  return out;
+}
+
 function sanitizeVersionMap(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object') return out;
@@ -333,7 +356,8 @@ function sanitizeState(raw) {
     visits: sanitizeVisits(src.visits),
     hidden: sanitizeVersionMap(src.hidden),
     custom: sanitizeCustom(src.custom),
-    overrides: sanitizeOverrides(src.overrides)
+    overrides: sanitizeOverrides(src.overrides),
+    comments: sanitizeComments(src.comments)
   };
 }
 
@@ -480,6 +504,51 @@ function getStore(id) {
   return id ? storeCache.get(id) || null : null;
 }
 
+function commentFor(id) {
+  const rec = id ? state.comments[id] : null;
+  return rec && typeof rec.text === 'string' && rec.text ? rec.text : '';
+}
+
+function saveComment(id, rawText) {
+  if (!id) return false;
+  const text = String(rawText == null ? '' : rawText)
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .slice(0, COMMENT_MAX);
+  const prev = state.comments[id];
+  const prevText = prev && typeof prev.text === 'string' ? prev.text : '';
+  if (text === prevText) return false;
+  state.comments[id] = { text, upd: Date.now() };
+  saveLocal();
+  localDirty = true;
+  schedulePush();
+  return true;
+}
+
+function refreshCommentViews() {
+  if (currentScreen === 'routes') renderRoutesList();
+  if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
+}
+
+let commentTimer = null;
+let commentPending = null;
+
+function queueCommentSave(id, text) {
+  if (!id) return;
+  commentPending = { id, text };
+  clearTimeout(commentTimer);
+  commentTimer = setTimeout(flushCommentSave, 650);
+}
+
+function flushCommentSave() {
+  clearTimeout(commentTimer);
+  commentTimer = null;
+  const pending = commentPending;
+  commentPending = null;
+  if (!pending) return;
+  if (saveComment(pending.id, pending.text)) refreshCommentViews();
+}
+
 function isKnownRoute(name) {
   return name === ORYOL_ROUTE || ROUTE_NAMES.includes(name);
 }
@@ -597,6 +666,44 @@ function commit(options) {
 
 /* ----------------------------- Карта ----------------------------- */
 
+function createClusterGroup(kind) {
+  const isOk = kind === 'ok';
+  return L.markerClusterGroup({
+    maxClusterRadius: 46,
+    showCoverageOnHover: false,
+    spiderfyOnMaxZoom: true,
+    disableClusteringAtZoom: 17,
+    removeOutsideVisibleBounds: true,
+    iconCreateFunction(cluster) {
+      return L.divIcon({
+        className: 'store-cluster ' + (isOk ? 'ok-cluster' : 'due-cluster'),
+        html: '<div class="cluster' + (isOk ? ' ok' : '') + '">' +
+          '<span>' + cluster.getChildCount() + '</span>' +
+          '<small>' + (isOk ? 'в норме' : 'пора') + '</small>' +
+          '</div>',
+        iconSize: [54, 54],
+        iconAnchor: [27, 27]
+      });
+    }
+  });
+}
+
+function clusterGroupFor(due) {
+  if (!clusterLayers) return null;
+  return due ? clusterLayers.due : clusterLayers.ok;
+}
+
+function clusterGroupForMarker(marker) {
+  return clusterGroupFor(!!(marker && marker.options && marker.options.storeDue));
+}
+
+function refreshClusterLayers() {
+  if (!clusterLayers) return;
+  for (const layer of [clusterLayers.due, clusterLayers.ok]) {
+    if (layer && typeof layer.refreshClusters === 'function') layer.refreshClusters();
+  }
+}
+
 function initMap() {
   if (map || typeof L === 'undefined') return;
 
@@ -630,31 +737,13 @@ function initMap() {
 
   L.control.zoom({ position: 'topright' }).addTo(map);
 
-  clusterLayer = L.markerClusterGroup({
-    maxClusterRadius: 46,
-    showCoverageOnHover: false,
-    spiderfyOnMaxZoom: true,
-    disableClusteringAtZoom: 17,
-    removeOutsideVisibleBounds: true,
-    iconCreateFunction(cluster) {
-      const children = cluster.getAllChildMarkers();
-      let due = 0;
-      for (const marker of children) {
-        if (marker.options.storeDue) due += 1;
-      }
-      const allOk = due === 0;
-      return L.divIcon({
-        className: 'store-cluster',
-        html: '<div class="cluster' + (allOk ? ' ok' : '') + '">' +
-          '<span>' + children.length + '</span>' +
-          '<small>' + (allOk ? 'в норме' : 'пора') + '</small>' +
-          '</div>',
-        iconSize: [54, 54],
-        iconAnchor: [27, 27]
-      });
-    }
-  });
-  map.addLayer(clusterLayer);
+  clusterLayers = {
+    ok: createClusterGroup('ok'),
+    due: createClusterGroup('due')
+  };
+  /* «Пора» добавляем последней, чтобы её кластеры были поверх «в норме». */
+  map.addLayer(clusterLayers.ok);
+  map.addLayer(clusterLayers.due);
 
   map.on('click', onMapClick);
   map.on('zoomend', updateLocalBasemap);
@@ -961,9 +1050,10 @@ function markerMatchesFilter(store) {
 }
 
 function renderMapMarkers() {
-  if (!map || !clusterLayer) return;
+  if (!map || !clusterLayers) return;
 
-  if (typeof clusterLayer.clearLayers === 'function') clusterLayer.clearLayers();
+  clusterLayers.due.clearLayers();
+  clusterLayers.ok.clearLayers();
   markers.clear();
 
   const stores = mapStores();
@@ -1003,10 +1093,11 @@ function renderMapMarkers() {
     });
 
     markers.set(store.id, marker);
-    clusterLayer.addLayer(marker);
+    const group = clusterGroupFor(status.due);
+    if (group) group.addLayer(marker);
   }
 
-  if (typeof clusterLayer.refreshClusters === 'function') clusterLayer.refreshClusters();
+  refreshClusterLayers();
   updateMapEmpty();
 }
 
@@ -1016,12 +1107,17 @@ function refreshAllMarkers() {
     const store = getStore(id);
     if (!store) continue;
     const status = getStatus(store);
+    const wasDue = !!marker.options.storeDue;
     marker.options.storeDue = status.due;
     marker.setIcon(markerIcon(store));
+    if (wasDue !== status.due) {
+      const from = clusterGroupFor(wasDue);
+      const to = clusterGroupFor(status.due);
+      if (from) from.removeLayer(marker);
+      if (to) to.addLayer(marker);
+    }
   }
-  if (clusterLayer && typeof clusterLayer.refreshClusters === 'function') {
-    clusterLayer.refreshClusters();
-  }
+  refreshClusterLayers();
   if (selectedMarkerId) refreshMarkerSelection();
 }
 
@@ -1189,9 +1285,17 @@ function confirmDialog(title, text, okLabel, danger) {
     const textEl = $('#modal-text');
     const okBtn = $('#modal-ok');
     const cancelBtn = $('#modal-cancel');
+    const passWrap = $('#modal-pass');
+    const passInput = $('#modal-pass-input');
     if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn) {
       resolve(window.confirm(text));
       return;
+    }
+
+    if (passWrap) passWrap.classList.add('hidden');
+    if (passInput) {
+      passInput.value = '';
+      passInput.onkeydown = null;
     }
 
     titleEl.textContent = title;
@@ -1209,6 +1313,83 @@ function confirmDialog(title, text, okLabel, danger) {
     };
 
     okBtn.onclick = () => { cleanup(); resolve(true); };
+    cancelBtn.onclick = () => { cleanup(); resolve(false); };
+    modal.onclick = (event) => {
+      if (event.target === modal) { cleanup(); resolve(false); }
+    };
+  });
+}
+
+function localStoragePassword() {
+  try {
+    return atob(RESET_PASSWORD_B64);
+  } catch (e) {
+    return '';
+  }
+}
+
+function passwordMatches(value) {
+  return String(value == null ? '' : value) === localStoragePassword();
+}
+
+function passwordDialog(title, text, okLabel, danger) {
+  return new Promise((resolve) => {
+    const modal = $('#modal');
+    const titleEl = $('#modal-title');
+    const textEl = $('#modal-text');
+    const okBtn = $('#modal-ok');
+    const cancelBtn = $('#modal-cancel');
+    const passWrap = $('#modal-pass');
+    const passInput = $('#modal-pass-input');
+    const passError = $('#modal-pass-error');
+    if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !passWrap || !passInput) {
+      resolve(passwordMatches(window.prompt(text, '')));
+      return;
+    }
+
+    titleEl.textContent = title;
+    textEl.textContent = text;
+    okBtn.textContent = okLabel || 'Продолжить';
+    okBtn.classList.toggle('danger', !!danger);
+    okBtn.classList.toggle('primary', !danger);
+    passWrap.classList.remove('hidden');
+    passInput.value = '';
+    if (passError) passError.classList.add('hidden');
+    modal.classList.remove('hidden');
+    const focusTimer = setTimeout(() => {
+      try { passInput.focus(); } catch (e) { /* ignore */ }
+    }, 60);
+
+    const cleanup = () => {
+      clearTimeout(focusTimer);
+      modal.classList.add('hidden');
+      passWrap.classList.add('hidden');
+      if (passError) passError.classList.add('hidden');
+      passInput.value = '';
+      passInput.onkeydown = null;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.onclick = null;
+    };
+
+    const submit = () => {
+      if (!passwordMatches(passInput.value)) {
+        if (passError) passError.classList.remove('hidden');
+        passInput.value = '';
+        try { passInput.focus(); } catch (e) { /* ignore */ }
+        return;
+      }
+      cleanup();
+      resolve(true);
+    };
+
+    okBtn.onclick = submit;
+    passInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      }
+    };
     cancelBtn.onclick = () => { cleanup(); resolve(false); };
     modal.onclick = (event) => {
       if (event.target === modal) { cleanup(); resolve(false); }
@@ -1480,11 +1661,17 @@ function renderRouteDetail(name) {
       const address = store.address
         ? '<span class="route-store-addr">' + escapeHtml(store.address) + '</span>'
         : '<span class="route-store-addr empty">Адрес не указан</span>';
+      const comment = commentFor(store.id);
+      const flatComment = comment ? comment.replace(/\s+/g, ' ').trim() : '';
+      const commentLine = flatComment
+        ? '<span class="route-store-comment">' + escapeHtml(flatComment.length > 90 ? flatComment.slice(0, 90).trimEnd() + '…' : flatComment) + '</span>'
+        : '';
       group += '<div class="route-store" data-action="open-store" data-id="' + escapeHtml(store.id) + '" role="button" tabindex="0">' +
         '<span class="status-dot ' + (status.due ? 'due' : 'ok') + '">' + brandMiniHtml(store.brand) + '</span>' +
         '<div class="route-store-main">' +
           '<span class="route-store-name">' + escapeHtml(store.name) + '</span>' +
           address +
+          commentLine +
           '<span class="route-store-status ' + (status.due ? 'due' : 'ok') + '">' +
             escapeHtml(routeStoreStatusText(store, status)) +
             (store.period ? ' · свой срок ' + store.period + ' дн.' : '') +
@@ -1537,12 +1724,14 @@ function renderSettings() {
     const routeCount = routeStores().length;
     const visited = allStores.filter(s => visitTime(s.id)).length;
     const due = allStores.filter(s => getStatus(s).due).length;
+    const comments = Object.keys(state.comments).filter(id => commentFor(id)).length;
     stats.innerHTML =
       '<span>Всего: <b>' + allStores.length + '</b></span>' +
       '<span>На карте: <b>' + mapCount + '</b></span>' +
       '<span>В маршрутах: <b>' + routeCount + '</b></span>' +
       '<span>Посещено: <b>' + visited + '</b></span>' +
       '<span>Пора: <b>' + due + '</b></span>' +
+      (comments ? '<span>С комментарием: <b>' + comments + '</b></span>' : '') +
       (hiddenCount ? '<span>Скрыто: <b>' + hiddenCount + '</b></span>' : '');
   }
 
@@ -1608,6 +1797,7 @@ function renderStoreSheet() {
   const address = store.address
     ? escapeHtml(store.address)
     : 'Адрес не указан — нажмите, чтобы заполнить';
+  const comment = commentFor(store.id);
 
   const progress = status.at ? Math.round(status.progress * 100) : 0;
   let timerSub = status.at
@@ -1653,6 +1843,18 @@ function renderStoreSheet() {
         '<div class="timer-bar"><i style="width:' + progress + '%"></i></div>' +
         '<div class="timer-sub">' + escapeHtml(timerSub) + '</div>' +
       '</div>' +
+      '<div class="comment-card">' +
+        '<div class="comment-head">' +
+          '<svg class="icon"><use href="#i-pencil"/></svg>' +
+          '<span class="comment-title">Комментарий</span>' +
+          (comment
+            ? '<button class="comment-clear" type="button" data-action="clear-comment" data-id="' + escapeHtml(store.id) + '">Очистить</button>'
+            : '') +
+        '</div>' +
+        '<textarea id="store-comment" class="comment-input" rows="3" maxlength="' + COMMENT_MAX +
+          '" placeholder="Заметка о точке или посещении">' + escapeHtml(comment) + '</textarea>' +
+        '<div class="comment-hint">Сохраняется автоматически и остаётся, пока вы его не измените или не очистите.</div>' +
+      '</div>' +
       '<div class="sheet-actions">' +
         visitButton +
         '<button class="btn" type="button" data-action="edit-store" data-id="' + escapeHtml(store.id) + '">' +
@@ -1667,6 +1869,7 @@ function renderStoreSheet() {
 function openStoreSheet(id) {
   const store = getStore(id);
   if (!store) return;
+  flushCommentSave();
   sheetStoreId = id;
   renderStoreSheet();
   openSheetEl($('#store-sheet'));
@@ -1692,6 +1895,7 @@ function openSheetEl(el) {
 }
 
 function closeSheets() {
+  flushCommentSave();
   const backdrop = $('#sheet-backdrop');
   const el = openedSheetEl;
   openedSheetEl = null;
@@ -1903,8 +2107,8 @@ async function deleteStoreById(id) {
   const ok = await confirmDialog(
     'Удалить точку?',
     '«' + store.name + '»' + (store.address ? ' (' + store.address + ')' : '') +
-      ' будет скрыта из карты и маршрутов. Точку можно вернуть в настройках.',
-    'Удалить',
+      ' исчезнет с карты и из маршрутов. Вернуть её можно в настройках: «Данные» → «Восстановить удалённые точки».',
+    'Удалить точку',
     true
   );
   if (!ok) return;
@@ -1944,9 +2148,10 @@ async function markWholeRoute(route) {
 async function restoreHiddenStores() {
   const ids = Object.keys(state.hidden).filter(id => isHidden(id));
   if (!ids.length) return;
-  const ok = await confirmDialog(
+  const ok = await passwordDialog(
     'Восстановить точки?',
-    'Вернуть ' + ids.length + ' ' + plural(ids.length, 'удалённую точку', 'удалённые точки', 'удалённых точек') + ' на карту и в маршруты?',
+    'Вернуть ' + ids.length + ' ' + plural(ids.length, 'удалённую точку', 'удалённые точки', 'удалённых точек') +
+      ' на карту и в маршруты? Введите пароль, чтобы подтвердить.',
     'Восстановить',
     false
   );
@@ -1957,14 +2162,19 @@ async function restoreHiddenStores() {
 }
 
 async function resetAllVisits() {
-  const ok = await confirmDialog(
+  const ok = await passwordDialog(
     'Сбросить все отметки?',
-    'Все магазины снова станут зелёными, история визитов будет удалена. Это действие не отменить.',
+    'Все магазины снова станут зелёными, история визитов будет удалена. Это действие не отменить. Введите пароль, чтобы подтвердить.',
     'Сбросить',
     true
   );
   if (!ok) return;
-  state.visits = {};
+  /* Не удаляем ключи: синхронизация передаёт удаление как { at: null }.
+     Иначе облако вернуло бы старые отметки при следующей синхронизации. */
+  const now = Date.now();
+  for (const [id, rec] of Object.entries(state.visits)) {
+    if (rec && rec.at) state.visits[id] = { at: null, upd: now };
+  }
   commit();
   showSnackbar('Все отметки посещений сброшены');
 }
@@ -2394,6 +2604,9 @@ function applyCloud(data) {
   if (src.overrides2 && typeof src.overrides2 === 'object') {
     if (mergeRecordMaps(state.overrides, sanitizeOverrides(src.overrides2))) changed = true;
   }
+  if (src.comments2 && typeof src.comments2 === 'object') {
+    if (mergeRecordMaps(state.comments, sanitizeComments(src.comments2))) changed = true;
+  }
   if (src.addresses && typeof src.addresses === 'object') {
     for (const [id, address] of Object.entries(src.addresses)) {
       if (!id || typeof address !== 'string') continue;
@@ -2435,8 +2648,14 @@ function afterCloudApply() {
   if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
   if (currentScreen === 'settings') renderSettings();
   if (sheetStoreId) {
-    if (getStore(sheetStoreId)) renderStoreSheet();
-    else closeSheets();
+    const active = document.activeElement;
+    if (active && active.id === 'store-comment' && getStore(sheetStoreId)) {
+      /* Не перерисовываем карточку, пока пользователь печатает комментарий. */
+    } else if (getStore(sheetStoreId)) {
+      renderStoreSheet();
+    } else {
+      closeSheets();
+    }
   }
   applyBasemap();
 }
@@ -2460,7 +2679,8 @@ async function pushState() {
     ['visits2', state.visits, cloud.pushed.visits],
     ['hidden2', state.hidden, cloud.pushed.hidden],
     ['custom2', state.custom, cloud.pushed.custom],
-    ['overrides2', state.overrides, cloud.pushed.overrides]
+    ['overrides2', state.overrides, cloud.pushed.overrides],
+    ['comments2', state.comments, cloud.pushed.comments]
   ];
 
   for (const [prefix, current, previous] of mapPrefixes) {
@@ -2485,6 +2705,7 @@ async function pushState() {
         hidden2: state.hidden,
         custom2: state.custom,
         overrides2: state.overrides,
+        comments2: state.comments,
         settings2: state.settings,
         intervalDays: clampPeriod(state.settings.periodDays),
         visits: {},
@@ -2507,6 +2728,7 @@ async function pushState() {
       hidden: clone(state.hidden),
       custom: clone(state.custom),
       overrides: clone(state.overrides),
+      comments: clone(state.comments),
       settings: clone(state.settings)
     };
     cloud.online = true;
@@ -2538,7 +2760,7 @@ async function initCloud(force) {
     cloud.online = false;
     cloud.failed = false;
     cloud.hasPushed = false;
-    cloud.pushed = { visits: {}, hidden: {}, custom: {}, overrides: {}, settings: null };
+    cloud.pushed = { visits: {}, hidden: {}, custom: {}, overrides: {}, comments: {}, settings: null };
     localDirty = true;
   }
 
@@ -2665,6 +2887,18 @@ function handleAction(action, el) {
     case 'delete-store':
       if (id) deleteStoreById(id);
       break;
+    case 'clear-comment': {
+      if (id) {
+        flushCommentSave();
+        saveComment(id, '');
+        const input = $('#store-comment');
+        if (input) input.value = '';
+        renderStoreSheet();
+        refreshCommentViews();
+        showSnackbar('Комментарий удалён');
+      }
+      break;
+    }
     case 'open-store':
       if (id) openStoreSheet(id);
       break;
@@ -2710,8 +2944,25 @@ function bindEvents() {
     }
   });
 
+  document.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!target || target.id !== 'store-comment') return;
+    if (!sheetStoreId) return;
+    queueCommentSave(sheetStoreId, target.value);
+  });
+
+  document.addEventListener('focusout', (event) => {
+    if (event.target && event.target.id === 'store-comment') flushCommentSave();
+  });
+
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      const modal = $('#modal');
+      if (modal && !modal.classList.contains('hidden')) {
+        const cancel = $('#modal-cancel');
+        if (cancel) cancel.click();
+        return;
+      }
       closeSheets();
       return;
     }
@@ -2868,7 +3119,8 @@ function tick() {
   if (currentScreen === 'routes') renderRoutesList();
   if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
   if (sheetStoreId && openedSheetEl && openedSheetEl.id === 'store-sheet' && !formState) {
-    renderStoreSheet();
+    const active = document.activeElement;
+    if (!active || active.id !== 'store-comment') renderStoreSheet();
   }
 }
 
