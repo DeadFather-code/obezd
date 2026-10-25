@@ -649,6 +649,7 @@ function setStoreVisited(id, mark) {
 
 function commit(options) {
   const opts = options || {};
+  flushCommentSave();
   saveLocal();
   if (opts.structure) rebuildStoreCache();
   if (map) {
