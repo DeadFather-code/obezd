@@ -6,13 +6,14 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
 const PERIOD_MIN = 1;
 const PERIOD_MAX = 365;
 const ROUTE_NAMES = ['Ливны1', 'Ливны2', 'Залегощь', 'Карачев', 'Мценск', 'Кромы', 'Болхов'];
+const ORYOL_ROUTE = 'Орёл';
 const DAY_MS = 86400000;
 
 const FIREBASE_CONFIG = {
@@ -479,7 +480,12 @@ function getStore(id) {
   return id ? storeCache.get(id) || null : null;
 }
 
+function isKnownRoute(name) {
+  return name === ORYOL_ROUTE || ROUTE_NAMES.includes(name);
+}
+
 function storesForRoute(route) {
+  if (route === ORYOL_ROUTE) return mapStores();
   return allStores.filter(s => s.route === route);
 }
 
@@ -1281,7 +1287,7 @@ function go(tab) {
 }
 
 function openRoute(name) {
-  if (!ROUTE_NAMES.includes(name)) return;
+  if (!isKnownRoute(name)) return;
   currentRoute = name;
   currentScreen = 'route';
   showScreen('screen-route');
@@ -1313,6 +1319,50 @@ function routeVisitedSummary(name) {
 
 /* --------------------------- Маршруты --------------------------- */
 
+function routeCardHtml(name, stores, counts) {
+  const isOryol = name === ORYOL_ROUTE;
+  const isEmpty = stores.length === 0;
+  const badgeClass = isEmpty ? 'route-badge empty' : (counts.due ? 'route-badge' : 'route-badge ok');
+  const badgeText = isEmpty ? 'пусто' : (counts.due ? counts.due + ' пора' : 'всё в норме');
+  const progress = stores.length ? Math.round((counts.ok / stores.length) * 100) : 0;
+
+  let lastVisit = 0;
+  for (const store of stores) {
+    const at = visitTime(store.id);
+    if (at && at > lastVisit) lastVisit = at;
+  }
+
+  let footLeft;
+  if (isEmpty) footLeft = isOryol ? 'На карте пока нет магазинов' : 'Добавьте магазины вручную';
+  else if (counts.due) footLeft = counts.due + ' ' + plural(counts.due, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита';
+  else if (lastVisit) footLeft = 'Последний визит ' + formatDate(lastVisit);
+  else footLeft = 'Все магазины в норме';
+
+  const icon = isOryol
+    ? '<svg class="icon route-card-icon"><use href="#i-map"/></svg>'
+    : '';
+  const metaRight = isOryol
+    ? 'все точки на карте'
+    : 'срок ' + storePeriod(stores[0] || { period: null }) + ' дн.';
+
+  return '<button class="route-card' + (counts.due ? ' has-due' : '') + (isOryol ? ' route-card-oryol' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
+    '<div class="route-card-head">' +
+      '<div class="route-card-name">' + icon + escapeHtml(name) + '</div>' +
+      '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' +
+    '</div>' +
+    '<div class="route-meta">' +
+      '<span>' + stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + '</span>' +
+      '<span class="sep"></span>' +
+      '<span>' + escapeHtml(metaRight) + '</span>' +
+    '</div>' +
+    '<div class="route-progress"><i style="width:' + progress + '%"></i></div>' +
+    '<div class="route-foot">' +
+      '<span>' + escapeHtml(footLeft) + '</span>' +
+      '<span class="route-foot-right">Открыть <svg class="icon"><use href="#i-chevron"/></svg></span>' +
+    '</div>' +
+  '</button>';
+}
+
 function renderRoutesList() {
   const list = $('#routes-list');
   if (!list) return;
@@ -1320,44 +1370,13 @@ function renderRoutesList() {
   let html = '';
   let totalDue = 0;
 
+  const oryolStores = storesForRoute(ORYOL_ROUTE);
+  html += routeCardHtml(ORYOL_ROUTE, oryolStores, storeStatusCounts(oryolStores));
+
   for (const name of ROUTE_NAMES) {
     const summary = routeVisitedSummary(name);
-    const { stores, counts } = summary;
-    totalDue += counts.due;
-
-    const isEmpty = stores.length === 0;
-    const badgeClass = isEmpty ? 'route-badge empty' : (counts.due ? 'route-badge' : 'route-badge ok');
-    const badgeText = isEmpty ? 'пусто' : (counts.due ? counts.due + ' пора' : 'всё в норме');
-    const progress = stores.length ? Math.round((counts.ok / stores.length) * 100) : 0;
-
-    let lastVisit = 0;
-    for (const store of stores) {
-      const at = visitTime(store.id);
-      if (at && at > lastVisit) lastVisit = at;
-    }
-
-    let footLeft;
-    if (isEmpty) footLeft = 'Добавьте магазины вручную';
-    else if (counts.due) footLeft = counts.due + ' ' + plural(counts.due, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита';
-    else if (lastVisit) footLeft = 'Последний визит ' + formatDate(lastVisit);
-    else footLeft = 'Все магазины в норме';
-
-    html += '<button class="route-card' + (counts.due ? ' has-due' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
-      '<div class="route-card-head">' +
-        '<div class="route-card-name">' + escapeHtml(name) + '</div>' +
-        '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' +
-      '</div>' +
-      '<div class="route-meta">' +
-        '<span>' + stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + '</span>' +
-        '<span class="sep"></span>' +
-        '<span>срок ' + storePeriod(stores[0] || { period: null }) + ' дн.</span>' +
-      '</div>' +
-      '<div class="route-progress"><i style="width:' + progress + '%"></i></div>' +
-      '<div class="route-foot">' +
-        '<span>' + escapeHtml(footLeft) + '</span>' +
-        '<span class="route-foot-right">Открыть <svg class="icon"><use href="#i-chevron"/></svg></span>' +
-      '</div>' +
-    '</button>';
+    totalDue += summary.counts.due;
+    html += routeCardHtml(name, summary.stores, summary.counts);
   }
 
   list.innerHTML = html;
@@ -1365,8 +1384,8 @@ function renderRoutesList() {
   const sub = $('#routes-sub');
   if (sub) {
     sub.textContent = totalDue
-      ? totalDue + ' ' + plural(totalDue, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита. Карта для них не нужна.'
-      : 'Все магазины в норме. Таймер и адреса — без карты.';
+      ? totalDue + ' ' + plural(totalDue, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита в дальних маршрутах. «Орёл» — все магазины с карты.'
+      : 'Все дальние маршруты в норме. «Орёл» — все магазины с карты, отметки общие.';
   }
 }
 
@@ -1387,8 +1406,9 @@ function routeStoreStatusText(store, status) {
 }
 
 function renderRouteDetail(name) {
-  if (!ROUTE_NAMES.includes(name)) { go('routes'); return; }
+  if (!isKnownRoute(name)) { go('routes'); return; }
 
+  const isOryol = name === ORYOL_ROUTE;
   const stores = storesForRoute(name).slice();
   const counts = storeStatusCounts(stores);
   const titleEl = $('#route-title');
@@ -1397,33 +1417,55 @@ function renderRouteDetail(name) {
   const listEl = $('#route-store-list');
   if (!overviewEl || !listEl) return;
 
+  const routeAdd = $('#route-add');
+  if (routeAdd) routeAdd.classList.toggle('hidden', isOryol);
+
   if (titleEl) titleEl.textContent = name;
   if (subEl) {
-    subEl.textContent = stores.length
-      ? stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + ' · срок ' + storePeriod(stores[0]) + ' дн.'
-      : 'Пока нет магазинов';
+    if (isOryol) {
+      subEl.textContent = stores.length
+        ? stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + ' · все точки на карте'
+        : 'На карте пока нет магазинов';
+    } else {
+      subEl.textContent = stores.length
+        ? stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + ' · срок ' + storePeriod(stores[0]) + ' дн.'
+        : 'Пока нет магазинов';
+    }
   }
+
+  const actionHtml = isOryol
+    ? '<button class="overview-action" type="button" data-action="show-map">На карту</button>'
+    : '<button class="overview-action" type="button" data-action="mark-route" data-route="' + escapeHtml(name) + '"' +
+        (counts.due ? '' : ' disabled') + '>Отметить всё</button>';
 
   overviewEl.innerHTML =
     '<div class="overview-stat due"><b>' + counts.due + '</b><span>пора посетить</span></div>' +
     '<div class="overview-divider"></div>' +
     '<div class="overview-stat ok"><b>' + counts.ok + '</b><span>в норме</span></div>' +
-    '<button class="overview-action" type="button" data-action="mark-route" data-route="' + escapeHtml(name) + '"' +
-      (counts.due ? '' : ' disabled') + '>Отметить всё</button>';
+    actionHtml;
 
   if (!stores.length) {
-    listEl.innerHTML =
-      '<div class="empty-state">' +
-        '<svg class="icon"><use href="#i-store"/></svg>' +
-        '<div><b>Маршрут пуст.</b><br>В открытых данных здесь нет Магнита или Пятёрочки — добавьте магазины вручную.</div>' +
-        '<button class="mini-primary" type="button" data-action="add-route-store" data-route="' + escapeHtml(name) + '">Добавить магазин</button>' +
-      '</div>';
+    if (isOryol) {
+      listEl.innerHTML =
+        '<div class="empty-state">' +
+          '<svg class="icon"><use href="#i-map"/></svg>' +
+          '<div><b>На карте пока нет магазинов.</b><br>Добавьте точку на карте — она сразу появится в этом списке.</div>' +
+          '<button class="mini-primary" type="button" data-action="show-map">Перейти к карте</button>' +
+        '</div>';
+    } else {
+      listEl.innerHTML =
+        '<div class="empty-state">' +
+          '<svg class="icon"><use href="#i-store"/></svg>' +
+          '<div><b>Маршрут пуст.</b><br>В открытых данных здесь нет Магнита или Пятёрочки — добавьте магазины вручную.</div>' +
+          '<button class="mini-primary" type="button" data-action="add-route-store" data-route="' + escapeHtml(name) + '">Добавить магазин</button>' +
+        '</div>';
+    }
     return;
   }
 
   const due = [];
   const ok = [];
-  stores.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  stores.sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.address || '').localeCompare(b.address || '', 'ru'));
   for (const store of stores) {
     const status = getStatus(store);
     (status.due ? due : ok).push({ store, status });
@@ -1877,6 +1919,7 @@ async function deleteStoreById(id) {
 }
 
 async function markWholeRoute(route) {
+  if (!ROUTE_NAMES.includes(route)) return;
   const stores = storesForRoute(route).filter(store => getStatus(store).due);
   if (!stores.length) {
     showSnackbar('В этом маршруте нечего отмечать');
@@ -2628,8 +2671,13 @@ function handleAction(action, el) {
     case 'mark-route':
       if (route) markWholeRoute(route);
       break;
-    case 'add-route-store':
-      openStoreForm(null, null, route || currentRoute);
+    case 'add-route-store': {
+      const targetRoute = route || currentRoute;
+      if (targetRoute && targetRoute !== ORYOL_ROUTE) openStoreForm(null, null, targetRoute);
+      break;
+    }
+    case 'show-map':
+      go('map');
       break;
     default:
       break;
@@ -2709,7 +2757,7 @@ function bindEvents() {
 
   const routeAdd = $('#route-add');
   if (routeAdd) routeAdd.addEventListener('click', () => {
-    if (currentRoute) openStoreForm(null, null, currentRoute);
+    if (currentRoute && currentRoute !== ORYOL_ROUTE) openStoreForm(null, null, currentRoute);
   });
 
   const backdrop = $('#sheet-backdrop');

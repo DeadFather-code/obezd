@@ -894,6 +894,19 @@ b, strong {
   letter-spacing: -0.2px;
 }
 
+.route-card-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  color: var(--green-text);
+  stroke-width: 2.1;
+}
+
+.route-card-oryol {
+  background: linear-gradient(160deg, rgba(22, 44, 40, 0.96), rgba(19, 30, 48, 0.96));
+}
+
 .route-badge {
   flex: 0 0 auto;
   display: inline-flex;
