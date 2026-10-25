@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Объезд">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="description" content="Отметки посещений магазинов и контроль периодичности объездов">
+  <title>Объезд магазинов</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<svg xmlns="http://www.w3.org/2000/svg" class="svg-sprite" aria-hidden="true">
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15M15 6v15"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h3a4 4 0 0 0 4-4v-2a4 4 0 0 1 4-4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h6M14 18h6"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17 18a4 4 0 0 0 .5-8A6 6 0 0 0 6 9a4.5 4.5 0 0 0-1 8.9"/><path d="M12 12v6M9 15l3-3 3 3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 10v10h16V10"/><path d="M3 10 5 4h14l2 6"/><path d="M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r=".8"/><circle cx="3.5" cy="12" r=".8"/><circle cx="3.5" cy="18" r=".8"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+</svg>
+
+<div id="boot" class="boot">
+  <img class="boot-logo" src="icons/logo-tile-192.png" alt="" width="82" height="82">
+  <div class="boot-title">Объезд магазинов</div>
+  <div class="boot-spinner"></div>
+  <div id="boot-error" class="boot-error hidden"></div>
+</div>
+
+<main id="app" class="app">
+
+  <!-- ================= КАРТА ================= -->
+  <section id="screen-map" class="screen screen-map active" aria-label="Карта магазинов">
+    <div id="map"></div>
+
+    <div class="map-top">
+      <div class="map-top-row">
+        <div class="app-badge">
+          <img class="app-logo" src="icons/logo-tile-192.png" alt="" width="38" height="38">
+          <div class="app-badge-text">
+            <span class="app-title">Объезд</span>
+            <span id="sync-status" class="sync-status"><i class="dot"></i><span id="sync-text">Загрузка…</span></span>
+          </div>
+        </div>
+        <div class="map-actions">
+          <button id="btn-fit" class="icon-btn" type="button" title="Показать все точки" aria-label="Показать все точки">
+            <svg class="icon"><use href="#i-target"/></svg>
+          </button>
+          <button id="btn-edit" class="icon-btn" type="button" title="Режим редактирования" aria-label="Режим редактирования">
+            <svg class="icon"><use href="#i-pencil"/></svg>
+          </button>
+          <button id="btn-import" class="icon-btn" type="button" title="Загрузить магазины из OpenStreetMap" aria-label="Загрузить магазины из OpenStreetMap">
+            <svg class="icon"><use href="#i-download"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="map-chips" role="group" aria-label="Фильтр по статусу">
+        <button class="chip active" type="button" data-filter="all">Все <b id="count-all">0</b></button>
+        <button class="chip chip-due" type="button" data-filter="due">Пора <b id="count-due">0</b></button>
+        <button class="chip chip-ok" type="button" data-filter="ok">В норме <b id="count-ok">0</b></button>
+      </div>
+    </div>
+
+    <div id="edit-banner" class="map-banner hidden">
+      <svg class="icon"><use href="#i-pencil"/></svg>
+      <span>Редактирование: перетаскивайте маркеры. Нажмите «+», чтобы добавить точку.</span>
+      <button id="edit-done" class="mini-primary" type="button">Готово</button>
+    </div>
+
+    <div id="add-banner" class="map-banner map-banner-add hidden">
+      <svg class="icon"><use href="#i-plus"/></svg>
+      <span>Нажмите на карту — точка появится в этом месте.</span>
+      <button id="add-cancel" class="mini-btn" type="button">Отмена</button>
+    </div>
+
+    <button id="fab-add" class="fab" type="button" title="Добавить точку" aria-label="Добавить точку">
+      <svg class="icon"><use href="#i-plus"/></svg>
+    </button>
+
+    <div id="map-empty" class="map-empty hidden">
+      <svg class="icon"><use href="#i-map"/></svg>
+      <div id="map-empty-text">Здесь пока нет точек</div>
+      <button class="mini-primary" type="button" data-open-add>Добавить точку</button>
+    </div>
+  </section>
+
+  <!-- ================= МАРШРУТЫ ================= -->
+  <section id="screen-routes" class="screen screen-scroll" aria-label="Дальние маршруты">
+    <header class="screen-head">
+      <div>
+        <h1>Дальние маршруты</h1>
+        <p id="routes-sub">Отмечайте магазины после объезда — таймер общий, карта не нужна.</p>
+      </div>
+    </header>
+    <div id="routes-list" class="routes-list"></div>
+    <div class="screen-note">
+      <svg class="icon"><use href="#i-clock"/></svg>
+      <span>Для каждой точки действует свой срок. По умолчанию — 45 дней, его можно изменить в настройках или у отдельного магазина.</span>
+    </div>
+  </section>
+
+  <!-- ================= МАРШРУТ: ДЕТАЛИ ================= -->
+  <section id="screen-route" class="screen screen-scroll" aria-label="Магазины маршрута">
+    <header class="screen-head screen-head-route">
+      <button id="route-back" class="icon-btn head-back" type="button" aria-label="Назад к маршрутам">
+        <svg class="icon"><use href="#i-back"/></svg>
+      </button>
+      <div class="route-head-text">
+        <h1 id="route-title">Маршрут</h1>
+        <p id="route-sub">—</p>
+      </div>
+      <button id="route-add" class="icon-btn" type="button" aria-label="Добавить магазин в маршрут">
+        <svg class="icon"><use href="#i-plus"/></svg>
+      </button>
+    </header>
+    <div id="route-overview" class="route-overview"></div>
+    <div id="route-store-list" class="route-store-list"></div>
+  </section>
+
+  <!-- ================= НАСТРОЙКИ ================= -->
+  <section id="screen-settings" class="screen screen-scroll" aria-label="Настройки">
+    <header class="screen-head">
+      <div>
+        <h1>Настройки</h1>
+        <p>Периодичность, синхронизация и резервная копия.</p>
+      </div>
+    </header>
+
+    <div class="settings-content">
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon icon-green"><svg class="icon"><use href="#i-clock"/></svg></div>
+          <div>
+            <h2>Периодичность визитов</h2>
+            <p>Через сколько дней магазин снова станет зелёным.</p>
+          </div>
+        </div>
+        <div class="period-control">
+          <button id="period-minus" class="step-btn" type="button" aria-label="Уменьшить на день">−</button>
+          <label class="period-value">
+            <input id="period-input" type="number" min="1" max="365" step="1" inputmode="numeric" aria-label="Периодичность в днях">
+            <span>дней</span>
+          </label>
+          <button id="period-plus" class="step-btn" type="button" aria-label="Увеличить на день">+</button>
+        </div>
+        <p class="fine">Меняется для всех точек, у которых не задан свой срок. Сейчас: <b id="period-current">45</b>.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon icon-blue"><svg class="icon"><use href="#i-cloud"/></svg></div>
+          <div>
+            <h2>Синхронизация группы</h2>
+            <p>Изменения видны всем участникам.</p>
+          </div>
+        </div>
+        <div class="sync-box">
+          <span id="settings-sync-dot" class="sync-dot"></span>
+          <div class="sync-box-text">
+            <b id="settings-sync-text">Подключение…</b>
+            <span id="settings-sync-sub">Проверяем облако</span>
+          </div>
+          <button id="btn-sync-now" class="mini-btn" type="button">Обновить</button>
+        </div>
+        <p class="fine">Без интернета приложение продолжает работать, отметки сохраняются на телефоне и отправятся в облако, когда связь появится.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon icon-amber"><svg class="icon"><use href="#i-download"/></svg></div>
+          <div>
+            <h2>Данные</h2>
+            <p>Резервная копия и восстановление.</p>
+          </div>
+        </div>
+        <div class="button-grid">
+          <button id="btn-export" class="block" type="button">
+            <svg class="icon"><use href="#i-download"/></svg> Скачать копию
+          </button>
+          <button id="btn-import-data" class="block" type="button">
+            <svg class="icon"><use href="#i-cloud"/></svg> Импорт
+          </button>
+        </div>
+        <div class="data-stats" id="data-stats"></div>
+        <button id="btn-restore-hidden" class="text-btn hidden" type="button">
+          <svg class="icon"><use href="#i-undo"/></svg> Восстановить удалённые точки (<span id="hidden-count">0</span>)
+        </button>
+        <button id="btn-reset-visits" class="text-btn text-danger" type="button">
+          <svg class="icon"><use href="#i-undo"/></svg> Сбросить все отметки посещений
+        </button>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon icon-slate"><svg class="icon"><use href="#i-layers"/></svg></div>
+          <div>
+            <h2>Карта и магазины</h2>
+            <p>Локальная схема Орла и открытые данные.</p>
+          </div>
+        </div>
+        <div class="basemap-title">
+          <b>Подложка карты</b>
+          <small>Локальная схема работает без интернета</small>
+        </div>
+        <div class="basemap-choice" role="group" aria-label="Подложка карты">
+          <button class="basemap-btn active" type="button" data-basemap="local" aria-pressed="true">
+            <b>Схема</b><small>локальная, без интернета</small>
+          </button>
+          <button class="basemap-btn" type="button" data-basemap="light" aria-pressed="false">
+            <b>Светлая</b><small>онлайн, OSM</small>
+          </button>
+        </div>
+        <p class="fine">Схема Орла встроена в приложение: улицы и маркеры видны без интернета. Светлая подложка включается только по желанию и требует связи.</p>
+        <button id="btn-import-osm" class="block" type="button">
+          <svg class="icon"><use href="#i-download"/></svg> Загрузить Магнит и Пятёрочку из OSM
+        </button>
+        <p class="fine">Точки и адреса берутся из OpenStreetMap. Яндекс.Карты используются только для перехода к точке и проверки адреса.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
+          <div>
+            <h2>Об приложении</h2>
+            <p>Версия <span id="app-version">2.3</span></p>
+          </div>
+        </div>
+        <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на зелёный кружок, чтобы отметить визит: он сразу станет красным.</p>
+        <p class="fine">Чтобы установить приложение на телефон: откройте сайт в Chrome или Safari и выберите «Добавить на главный экран».</p>
+      </section>
+
+      <div class="settings-footer">Данные карты © OpenStreetMap</div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ================= НИЖНЕЕ МЕНЮ ================= -->
+<nav id="tabbar" class="tabbar" aria-label="Разделы">
+  <button class="tab active" type="button" data-tab="map" aria-current="page">
+    <svg class="icon"><use href="#i-map"/></svg><span>Карта</span>
+  </button>
+  <button class="tab" type="button" data-tab="routes">
+    <svg class="icon"><use href="#i-route"/></svg><span>Маршруты</span>
+  </button>
+  <button class="tab" type="button" data-tab="settings">
+    <svg class="icon"><use href="#i-settings"/></svg><span>Настройки</span>
+  </button>
+</nav>
+
+<!-- ================= КАРТОЧКА МАГАЗИНА ================= -->
+<div id="sheet-backdrop" class="sheet-backdrop hidden"></div>
+
+<div id="store-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="store-sheet-title">
+  <div class="sheet-grip" data-close-sheet></div>
+  <div id="store-sheet-body"></div>
+</div>
+
+<!-- ================= ФОРМА ТОЧКИ ================= -->
+<div id="form-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="form-title">
+  <div class="sheet-grip" data-close-sheet></div>
+  <div class="sheet-head">
+    <div>
+      <h2 id="form-title">Точка</h2>
+      <p id="form-sub" class="fine"></p>
+    </div>
+    <button id="form-close" class="icon-btn" type="button" aria-label="Закрыть">
+      <svg class="icon"><use href="#i-x"/></svg>
+    </button>
+  </div>
+  <form id="store-form" class="form" novalidate>
+    <label class="field">
+      <span>Название</span>
+      <input id="f-name" type="text" maxlength="80" autocomplete="off" placeholder="Магнит">
+    </label>
+
+    <div class="field">
+      <span>Сеть</span>
+      <div class="segmented" id="f-brand" role="group" aria-label="Сеть магазина">
+        <button type="button" data-brand="magnit"><i class="brand-mini brand-magnit">М</i>Магнит</button>
+        <button type="button" data-brand="pyaterochka"><i class="brand-mini brand-pyaterochka">П</i>Пятёрочка</button>
+        <button type="button" data-brand="other"><i class="brand-mini brand-other">•</i>Другой</button>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Адрес</span>
+      <div class="input-with-btn">
+        <input id="f-address" type="text" maxlength="160" autocomplete="off" placeholder="Улица, дом">
+        <button id="f-geocode" class="mini-btn" type="button" title="Определить адрес по координатам">
+          <svg class="icon"><use href="#i-target"/></svg> Найти
+        </button>
+      </div>
+      <small id="f-address-hint" class="fine">Можно оставить пустым и заполнить позже.</small>
+    </label>
+
+    <label class="field">
+      <span>Свой срок, дней</span>
+      <div class="input-suffix">
+        <input id="f-period" type="number" min="1" max="365" step="1" inputmode="numeric" placeholder="45">
+        <span>дн.</span>
+      </div>
+      <small id="f-period-hint" class="fine">Пусто — общий срок 45 дней.</small>
+    </label>
+
+    <div id="f-coords-row" class="coords-row">
+      <div>
+        <span class="fine">Координаты</span>
+        <b id="f-coords">—</b>
+      </div>
+      <span class="fine">Перетащите маркер на карте, чтобы изменить</span>
+    </div>
+
+    <div id="form-error" class="form-error hidden"></div>
+
+    <div class="form-actions">
+      <button id="f-cancel" type="button">Отмена</button>
+      <button type="submit" class="primary">
+        <svg class="icon"><use href="#i-check"/></svg> Сохранить
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- ================= ИМПОРТ OSM ================= -->
+<div id="import-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="import-title">
+  <div class="sheet-grip" data-close-sheet></div>
+  <div class="sheet-head">
+    <div>
+      <h2 id="import-title">Магазины из OpenStreetMap</h2>
+      <p class="fine">Открытые данные вместо ручного перебора карты.</p>
+    </div>
+    <button id="import-close" class="icon-btn" type="button" aria-label="Закрыть">
+      <svg class="icon"><use href="#i-x"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <p class="muted">Загрузим магазины в видимой области карты. Уже добавленные и удалённые точки не дублируются.</p>
+
+    <label class="switch-row">
+      <span>
+        <b>Только Магнит и Пятёрочка</b>
+        <small>Выключите, чтобы добавить все продуктовые магазины</small>
+      </span>
+      <input id="import-only-chains" type="checkbox" checked>
+      <i class="switch" aria-hidden="true"></i>
+    </label>
+
+    <button id="import-visible" class="primary block" type="button">
+      <svg class="icon"><use href="#i-download"/></svg> Загрузить видимую область
+    </button>
+    <button id="import-oryol" class="block" type="button">
+      <svg class="icon"><use href="#i-map"/></svg> Загрузить весь Орёл
+    </button>
+
+    <div id="import-status" class="import-status"></div>
+    <p class="fine">Данные © участники OpenStreetMap. Адреса можно исправить в карточке магазина. Запросы идут на public Overpass API и требуют интернета.</p>
+  </div>
+</div>
+
+<!-- ================= ПОДТВЕРЖДЕНИЕ ================= -->
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-card">
+    <h3 id="modal-title">Подтверждение</h3>
+    <p id="modal-text"></p>
+    <div class="modal-actions">
+      <button id="modal-cancel" type="button">Отмена</button>
+      <button id="modal-ok" class="primary" type="button">ОК</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= СООБЩЕНИЕ ================= -->
+<div id="snackbar" class="snackbar hidden" role="status" aria-live="polite">
+  <span id="snackbar-text"></span>
+  <button id="snackbar-action" type="button"></button>
+</div>
+
+<input id="import-file" type="file" accept="application/json,.json" hidden>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
+<script src="js/app.js" defer></script>
+</body>
+</html>

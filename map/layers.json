@@ -1,0 +1,1 @@
+{"bounds":[[52.855,35.9],[53.055,36.215]],"levels":[{"name":"base","dir":"map","grid":1,"width":2372,"height":2500,"maxZoom":13},{"name":"lod1","dir":"map/lod1","grid":8,"width":4744,"height":5000,"maxZoom":15},{"name":"lod2","dir":"map/lod2","grid":16,"width":9488,"height":10000,"maxZoom":16},{"name":"lod3","dir":"map/lod3","grid":16,"width":18976,"height":20000,"maxZoom":18}]}

@@ -1,0 +1,591 @@
+{
+  "Ливны1": [
+    {
+      "id": "rp_livny1_1",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Фрунзе, 165",
+      "lat": 52.4410815,
+      "lon": 37.5775488,
+      "osm": "way/989853801"
+    },
+    {
+      "id": "rp_livny1_2",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "Московская улица, 111А",
+      "lat": 52.4299283,
+      "lon": 37.6164779,
+      "osm": "node/9191368135"
+    },
+    {
+      "id": "rp_livny1_3",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Кирова, 52А",
+      "lat": 52.429714,
+      "lon": 37.6052588,
+      "osm": "node/11576605007"
+    },
+    {
+      "id": "rp_livny1_4",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Фрунзе, 2А",
+      "lat": 52.428562,
+      "lon": 37.5974648,
+      "osm": "way/988854366"
+    },
+    {
+      "id": "rp_livny1_5",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Горького, 3",
+      "lat": 52.4277516,
+      "lon": 37.6057085,
+      "osm": "node/11576604991"
+    },
+    {
+      "id": "rp_livny1_6",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Горького, 6",
+      "lat": 52.4274093,
+      "lon": 37.6052014,
+      "osm": "node/9139474631"
+    },
+    {
+      "id": "rp_livny1_7",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Дружбы Народов, 121",
+      "lat": 52.4269026,
+      "lon": 37.6033538,
+      "osm": "node/1314887592"
+    },
+    {
+      "id": "rp_livny1_8",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Горького, 9",
+      "lat": 52.4266399,
+      "lon": 37.6059566,
+      "osm": "node/11576604995"
+    },
+    {
+      "id": "rp_livny1_9",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Карла Маркса, 139",
+      "lat": 52.42533,
+      "lon": 37.610624,
+      "osm": "node/9135456047"
+    },
+    {
+      "id": "rp_livny1_10",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Дзержинского, 105",
+      "lat": 52.4237945,
+      "lon": 37.6021213,
+      "osm": "node/9134423609"
+    },
+    {
+      "id": "rp_livny1_11",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Дружбы Народов, 149",
+      "lat": 52.4233564,
+      "lon": 37.6040643,
+      "osm": "node/9134423616"
+    },
+    {
+      "id": "rp_livny1_12",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "Заливенская улица, 63",
+      "lat": 52.4219804,
+      "lon": 37.6275967,
+      "osm": "node/9190060551"
+    },
+    {
+      "id": "rp_livny1_13",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Пушкина, 2",
+      "lat": 52.4212682,
+      "lon": 37.608472,
+      "osm": "node/5599126124"
+    },
+    {
+      "id": "rp_livny1_14",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "Воронежская улица, 17",
+      "lat": 52.4151701,
+      "lon": 37.6102826,
+      "osm": "way/941028346"
+    }
+  ],
+  "Ливны2": [
+    {
+      "id": "rp_livny2_1",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "Октябрьская улица, 7",
+      "lat": 52.4134272,
+      "lon": 37.5874202,
+      "osm": "node/9097236412"
+    },
+    {
+      "id": "rp_livny2_2",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "Октябрьская улица, 15",
+      "lat": 52.4125415,
+      "lon": 37.5834236,
+      "osm": "node/9097295966"
+    },
+    {
+      "id": "rp_livny2_3",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 52.4103962,
+      "lon": 37.5817019,
+      "osm": "node/13966001057"
+    },
+    {
+      "id": "rp_livny2_4",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Гайдара, 2А",
+      "lat": 52.4096603,
+      "lon": 37.5805435,
+      "osm": "node/9097295972"
+    },
+    {
+      "id": "rp_livny2_5",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Денисова, 5",
+      "lat": 52.4086618,
+      "lon": 37.5725841,
+      "osm": "node/9097750482"
+    },
+    {
+      "id": "rp_livny2_6",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Победы, 1",
+      "lat": 52.4076917,
+      "lon": 37.5701165,
+      "osm": "way/574061502"
+    },
+    {
+      "id": "rp_livny2_7",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Мира, 195",
+      "lat": 52.4052627,
+      "lon": 37.5733497,
+      "osm": "node/9050888304"
+    },
+    {
+      "id": "rp_livny2_8",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Мира, 180А",
+      "lat": 52.4051908,
+      "lon": 37.5712743,
+      "osm": "node/9103564225"
+    },
+    {
+      "id": "rp_livny2_9",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Гайдара, 14",
+      "lat": 52.4048702,
+      "lon": 37.5839469,
+      "osm": "way/574087046"
+    },
+    {
+      "id": "rp_livny2_10",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Мира, 205",
+      "lat": 52.4041836,
+      "lon": 37.5696904,
+      "osm": "node/9103507584"
+    },
+    {
+      "id": "rp_livny2_11",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Мира, 205",
+      "lat": 52.4041223,
+      "lon": 37.5694933,
+      "osm": "node/9103507585"
+    },
+    {
+      "id": "rp_livny2_12",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Мира, 217А",
+      "lat": 52.4024907,
+      "lon": 37.564322,
+      "osm": "node/9103624341"
+    },
+    {
+      "id": "rp_livny2_13",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "Курская улица, 315",
+      "lat": 52.3998674,
+      "lon": 37.5907012,
+      "osm": "way/751724024"
+    }
+  ],
+  "Залегощь": [],
+  "Карачев": [
+    {
+      "id": "rp_karachev_1",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.1288625,
+      "lon": 35.00456,
+      "osm": "node/11594811303"
+    },
+    {
+      "id": "rp_karachev_2",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.1247882,
+      "lon": 34.9818391,
+      "osm": "node/1237130031"
+    },
+    {
+      "id": "rp_karachev_3",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.1241277,
+      "lon": 34.9822055,
+      "osm": "node/11594811310"
+    },
+    {
+      "id": "rp_karachev_4",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.122292,
+      "lon": 34.9790599,
+      "osm": "way/448820134"
+    },
+    {
+      "id": "rp_karachev_5",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.1204238,
+      "lon": 34.9812151,
+      "osm": "node/11594811309"
+    },
+    {
+      "id": "rp_karachev_6",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Дзержинского, 2",
+      "lat": 53.1199731,
+      "lon": 34.9844655,
+      "osm": "way/194587487"
+    },
+    {
+      "id": "rp_karachev_7",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.1192103,
+      "lon": 35.0049084,
+      "osm": "node/11594811311"
+    },
+    {
+      "id": "rp_karachev_8",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.1191319,
+      "lon": 34.9997214,
+      "osm": "node/12089598191"
+    },
+    {
+      "id": "rp_karachev_9",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.1173404,
+      "lon": 34.9737558,
+      "osm": "node/11594811308"
+    }
+  ],
+  "Мценск": [
+    {
+      "id": "rp_mtsensk_1",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Кузьмина, 8",
+      "lat": 53.2940631,
+      "lon": 36.5893382,
+      "osm": "way/220650299"
+    },
+    {
+      "id": "rp_mtsensk_2",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Катукова, 8",
+      "lat": 53.2940331,
+      "lon": 36.594883,
+      "osm": "node/5981054831"
+    },
+    {
+      "id": "rp_mtsensk_3",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2929441,
+      "lon": 36.6012192,
+      "osm": "node/5214126692"
+    },
+    {
+      "id": "rp_mtsensk_4",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2907476,
+      "lon": 36.5966459,
+      "osm": "node/4825999921"
+    },
+    {
+      "id": "rp_mtsensk_5",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2893612,
+      "lon": 36.5958897,
+      "osm": "node/4826000021"
+    },
+    {
+      "id": "rp_mtsensk_6",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.28895,
+      "lon": 36.60015,
+      "osm": "node/10771231437"
+    },
+    {
+      "id": "rp_mtsensk_7",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2866285,
+      "lon": 36.5914893,
+      "osm": "node/5220384818"
+    },
+    {
+      "id": "rp_mtsensk_8",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2865207,
+      "lon": 36.5891459,
+      "osm": "node/5154244566"
+    },
+    {
+      "id": "rp_mtsensk_9",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2858884,
+      "lon": 36.5567195,
+      "osm": "node/1143797712"
+    },
+    {
+      "id": "rp_mtsensk_10",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2855971,
+      "lon": 36.5558131,
+      "osm": "node/5063846819"
+    },
+    {
+      "id": "rp_mtsensk_11",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2830374,
+      "lon": 36.5797814,
+      "osm": "node/5994609902"
+    },
+    {
+      "id": "rp_mtsensk_12",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2816458,
+      "lon": 36.5778707,
+      "osm": "node/4825972532"
+    },
+    {
+      "id": "rp_mtsensk_13",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2801194,
+      "lon": 36.5831536,
+      "osm": "node/5150737289"
+    },
+    {
+      "id": "rp_mtsensk_14",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.2787062,
+      "lon": 36.5794458,
+      "osm": "node/10542698410"
+    },
+    {
+      "id": "rp_mtsensk_15",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2777034,
+      "lon": 36.5732387,
+      "osm": "node/11576446164"
+    },
+    {
+      "id": "rp_mtsensk_16",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2751562,
+      "lon": 36.5754789,
+      "osm": "node/11576446163"
+    },
+    {
+      "id": "rp_mtsensk_17",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2742765,
+      "lon": 36.5746764,
+      "osm": "node/11576446162"
+    },
+    {
+      "id": "rp_mtsensk_18",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2720971,
+      "lon": 36.5674299,
+      "osm": "node/5236289873"
+    },
+    {
+      "id": "rp_mtsensk_19",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.2655274,
+      "lon": 36.5915698,
+      "osm": "node/5222141254"
+    }
+  ],
+  "Кромы": [
+    {
+      "id": "rp_kromy_1",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 52.6920103,
+      "lon": 35.7796733,
+      "osm": "node/5164397826"
+    },
+    {
+      "id": "rp_kromy_2",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 52.6916344,
+      "lon": 35.7823237,
+      "osm": "node/5164397827"
+    },
+    {
+      "id": "rp_kromy_3",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 52.6899694,
+      "lon": 35.7721444,
+      "osm": "node/11576446161"
+    },
+    {
+      "id": "rp_kromy_4",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Карла Маркса",
+      "lat": 52.6859734,
+      "lon": 35.75811,
+      "osm": "node/4111162391"
+    }
+  ],
+  "Болхов": [
+    {
+      "id": "rp_bolkhov_1",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "улица Ленина, 30Б",
+      "lat": 53.4493501,
+      "lon": 36.0058314,
+      "osm": "node/4584907191"
+    },
+    {
+      "id": "rp_bolkhov_2",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "улица Ленина, 28",
+      "lat": 53.4489494,
+      "lon": 36.0058511,
+      "osm": "node/9173295465"
+    },
+    {
+      "id": "rp_bolkhov_3",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "Первомайская улица, 45А",
+      "lat": 53.4367654,
+      "lon": 36.0023156,
+      "osm": "node/4583794892"
+    },
+    {
+      "id": "rp_bolkhov_4",
+      "name": "Магнит",
+      "brand": "magnit",
+      "address": "",
+      "lat": 53.4360378,
+      "lon": 36.0043153,
+      "osm": "node/4824790421"
+    },
+    {
+      "id": "rp_bolkhov_5",
+      "name": "Пятёрочка",
+      "brand": "pyaterochka",
+      "address": "",
+      "lat": 53.4325798,
+      "lon": 36.0094973,
+      "osm": "node/4967639039"
+    }
+  ]
+}
