@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.7';
+const APP_VERSION = '2.8';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -17,6 +17,13 @@ const ORYOL_ROUTE = 'Орёл';
 const DAY_MS = 86400000;
 const COMMENT_MAX = 1000;
 const PROFILE_NAME_MAX = 40;
+
+/* Геопозиция: позиция пишется в отдельный документ участника. */
+const PRESENCE_STALE_MS = 10 * 60 * 1000;
+const PRESENCE_ONLINE_MS = 2 * 60 * 1000;
+const PRESENCE_SEND_MS = 20000;
+const PRESENCE_MOVE_M = 25;
+const PRESENCE_MAX_ACC_M = 500;
 
 /* Пароль на опасные действия в настройках. Это защита от случайного
    нажатия, а не криптография: значение лежит в коде приложения. */
@@ -70,7 +77,13 @@ function emptyState() {
 }
 
 let state = emptyState();
-let uiPrefs = { screen: 'map', filter: 'all', profile: { id: '', name: '' } };
+let uiPrefs = {
+  screen: 'map',
+  filter: 'all',
+  profile: { id: '', name: '' },
+  shareLocation: false,
+  shareAsked: false
+};
 
 let mapStoresSeed = [];
 let routeSeed = {};
@@ -125,6 +138,26 @@ let pushTimer = null;
 let pushInFlight = false;
 let pushAgain = false;
 let localDirty = false;
+
+/* ------------------------- Геопозиция ------------------------- */
+
+let presence = new Map();
+let presenceMarkers = new Map();
+let presenceLayer = null;
+let presenceUnsub = null;
+let presenceWriteBusy = false;
+let presenceWritePending = false;
+let presenceTroubleShown = false;
+
+let myLocation = null;
+let myLocationMarker = null;
+let myAccuracyCircle = null;
+let geoWatchId = null;
+let locationWanted = false;
+let centerOnNextFix = false;
+let locateHintTimer = null;
+let lastPresenceSent = null;
+let lastPresenceAt = 0;
 
 /* --------------------------- Утилиты --------------------------- */
 
@@ -299,11 +332,13 @@ function saveProfileName(rawName) {
   saveLocal();
   localDirty = true;
   schedulePush();
+  if (uiPrefs.shareLocation) maybeSendPresence(true);
   if (changed) {
     if (currentScreen === 'settings') renderSettings();
     if (currentScreen === 'routes') renderRoutesList();
     if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
     if (sheetStoreId) renderStoreSheet();
+    maybeAskSharing();
   }
   return true;
 }
@@ -514,6 +549,8 @@ function loadLocal() {
         id: typeof savedProfile.id === 'string' ? savedProfile.id.slice(0, 80) : '',
         name: normalizeProfileName(savedProfile.name)
       };
+      uiPrefs.shareLocation = prefs.shareLocation === true;
+      uiPrefs.shareAsked = prefs.shareAsked === true;
     }
   } catch (e) { /* ignore */ }
   if (!uiPrefs.profile.id) uiPrefs.profile.id = makeId('user');
@@ -911,6 +948,8 @@ function initMap() {
 
   loadMapAssets();
   setTimeout(() => map.invalidateSize(), 80);
+  renderPresence();
+  if (myLocation) renderMyLocation();
 }
 
 function handleTileError() {
@@ -1333,6 +1372,444 @@ function fitMapToStores() {
   map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
 }
 
+/* ------------------------- Геопозиция ------------------------- */
+
+function locationSupported() {
+  return typeof navigator !== 'undefined' && navigator.geolocation &&
+    typeof navigator.geolocation.watchPosition === 'function';
+}
+
+function distanceMeters(a, b) {
+  if (!a || !b) return Infinity;
+  const radius = 6371000;
+  const toRad = value => value * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function presenceHue(id) {
+  let hash = 0;
+  const text = String(id || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) % 360;
+  }
+  return Math.abs(hash);
+}
+
+function presenceAgoText(at) {
+  const diff = Math.max(0, Date.now() - (at || 0));
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'только что';
+  if (minutes < 60) {
+    return minutes + ' ' + plural(minutes, 'минуту', 'минуты', 'минут') + ' назад';
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return hours + ' ' + plural(hours, 'час', 'часа', 'часов') + ' назад';
+  }
+  return formatDateTime(at);
+}
+
+function ensurePresenceLayer() {
+  if (!map) return null;
+  if (!presenceLayer) presenceLayer = L.layerGroup().addTo(map);
+  return presenceLayer;
+}
+
+function renderMyLocation() {
+  const layer = ensurePresenceLayer();
+  if (!layer || !myLocation) return;
+  const latlng = [myLocation.lat, myLocation.lng];
+  if (!myLocationMarker) {
+    myLocationMarker = L.marker(latlng, {
+      icon: L.divIcon({
+        className: 'me-marker',
+        html: '<div class="me-dot"><span></span></div>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      }),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1200
+    });
+    layer.addLayer(myLocationMarker);
+  } else {
+    myLocationMarker.setLatLng(latlng);
+  }
+  if (myLocation.acc > 0 && myLocation.acc <= PRESENCE_MAX_ACC_M) {
+    if (!myAccuracyCircle) {
+      myAccuracyCircle = L.circle(latlng, {
+        radius: myLocation.acc,
+        className: 'me-accuracy',
+        interactive: false
+      });
+      layer.addLayer(myAccuracyCircle);
+    } else {
+      myAccuracyCircle.setLatLng(latlng);
+      myAccuracyCircle.setRadius(myLocation.acc);
+    }
+  } else if (myAccuracyCircle) {
+    layer.removeLayer(myAccuracyCircle);
+    myAccuracyCircle = null;
+  }
+}
+
+function personIcon(rec, uid) {
+  const name = rec.name || 'Участник';
+  const initial = name.slice(0, 1).toUpperCase();
+  return L.divIcon({
+    className: 'person-marker',
+    html: '<div class="person-pin" style="--hue:' + presenceHue(uid) + '">' +
+      '<span class="person-avatar">' + escapeHtml(initial) + '</span>' +
+      '<span class="person-name">' + escapeHtml(name) + '</span>' +
+      '</div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14]
+  });
+}
+
+function personPopupHtml(rec) {
+  const acc = rec.acc ? ' · ±' + Math.round(rec.acc) + ' м' : '';
+  return '<div class="person-popup"><b>' + escapeHtml(rec.name || 'Участник') + '</b><br>' +
+    escapeHtml(presenceAgoText(rec.at)) + acc + '</div>';
+}
+
+function renderPresence() {
+  if (!map) return;
+  const layer = ensurePresenceLayer();
+  if (!layer) return;
+  const now = Date.now();
+  const seen = new Set();
+
+  for (const [uid, rec] of presence) {
+    if (uid === uiPrefs.profile.id) continue;
+    if (!rec || !isValidCoord(rec.lat, rec.lng)) continue;
+    if (!rec.at || now - rec.at > PRESENCE_STALE_MS) continue;
+    seen.add(uid);
+    const latlng = [rec.lat, rec.lng];
+    let marker = presenceMarkers.get(uid);
+    if (!marker) {
+      marker = L.marker(latlng, {
+        icon: personIcon(rec, uid),
+        keyboard: false,
+        zIndexOffset: 800,
+        title: rec.name || 'Участник'
+      });
+      marker.bindPopup(personPopupHtml(rec));
+      presenceMarkers.set(uid, marker);
+      layer.addLayer(marker);
+    } else {
+      marker.setLatLng(latlng);
+      marker.setIcon(personIcon(rec, uid));
+      marker.setPopupContent(personPopupHtml(rec));
+    }
+  }
+
+  for (const [uid, marker] of presenceMarkers) {
+    if (!seen.has(uid)) {
+      layer.removeLayer(marker);
+      presenceMarkers.delete(uid);
+    }
+  }
+  renderPeopleBar();
+}
+
+function renderPeopleBar() {
+  const bar = $('#people-bar');
+  if (!bar) return;
+  const now = Date.now();
+  const items = [];
+  for (const [uid, rec] of presence) {
+    if (uid === uiPrefs.profile.id) continue;
+    if (!rec || !rec.at || now - rec.at > PRESENCE_STALE_MS) continue;
+    items.push({ uid, rec });
+  }
+  if (!items.length) {
+    bar.innerHTML = '';
+    bar.classList.add('hidden');
+    return;
+  }
+  items.sort((a, b) => (b.rec.at || 0) - (a.rec.at || 0));
+  bar.innerHTML = items.map(({ uid, rec }) => {
+    const online = now - (rec.at || 0) <= PRESENCE_ONLINE_MS;
+    return '<button class="person-chip' + (online ? ' online' : '') + '" type="button" data-person="' +
+      escapeHtml(uid) + '" title="' + escapeHtml(rec.name || 'Участник') + '">' +
+      '<span class="dot"></span><span>' + escapeHtml(rec.name || 'Участник') + '</span>' +
+      '<small>' + escapeHtml(presenceAgoText(rec.at)) + '</small></button>';
+  }).join('');
+  bar.classList.remove('hidden');
+}
+
+function centerOnPerson(uid) {
+  const rec = uid ? presence.get(uid) : null;
+  if (!map || !rec || !isValidCoord(rec.lat, rec.lng)) return;
+  map.setView([rec.lat, rec.lng], Math.max(map.getZoom(), 15), { animate: true });
+  const marker = presenceMarkers.get(uid);
+  if (marker && typeof marker.openPopup === 'function') {
+    try { marker.openPopup(); } catch (e) { /* ignore */ }
+  }
+}
+
+function startGeoWatch() {
+  if (!locationSupported() || geoWatchId != null || document.hidden) return;
+  try {
+    geoWatchId = navigator.geolocation.watchPosition(handleGeoPosition, handleGeoError, {
+      enableHighAccuracy: true,
+      maximumAge: 8000,
+      timeout: 25000
+    });
+  } catch (error) {
+    geoWatchId = null;
+    console.warn('Геопозиция недоступна', error);
+  }
+}
+
+function stopGeoWatch() {
+  if (geoWatchId != null && locationSupported()) {
+    try { navigator.geolocation.clearWatch(geoWatchId); } catch (e) { /* ignore */ }
+  }
+  geoWatchId = null;
+}
+
+function locationWatchNeeded() {
+  if (document.hidden) return false;
+  if (uiPrefs.shareLocation) return true;
+  return locationWanted && currentScreen === 'map';
+}
+
+function refreshGeoWatch() {
+  if (locationWatchNeeded()) startGeoWatch();
+  else stopGeoWatch();
+}
+
+function handleGeoPosition(position) {
+  if (!position || !position.coords) return;
+  const lat = toNumber(position.coords.latitude);
+  const lng = toNumber(position.coords.longitude);
+  if (!isValidCoord(lat, lng)) return;
+  myLocation = {
+    lat,
+    lng,
+    acc: toNumber(position.coords.accuracy) || 0,
+    at: Date.now()
+  };
+  renderMyLocation();
+
+  const locateBtn = $('#btn-locate');
+  if (locateBtn) locateBtn.classList.remove('locating');
+  clearTimeout(locateHintTimer);
+
+  if (centerOnNextFix && map) {
+    centerOnNextFix = false;
+    map.setView([lat, lng], Math.max(map.getZoom(), 15), { animate: true });
+  }
+
+  if (uiPrefs.shareLocation) maybeSendPresence();
+}
+
+function handleGeoError(error) {
+  const locateBtn = $('#btn-locate');
+  if (locateBtn) locateBtn.classList.remove('locating');
+  centerOnNextFix = false;
+  const code = error && error.code;
+  if (code === 1) {
+    if (uiPrefs.shareLocation) setShareEnabled(false, { ask: false });
+    showSnackbar('Разрешите доступ к геопозиции в настройках браузера или телефона');
+  } else if (code === 3) {
+    showSnackbar('Не удалось определить местоположение. Попробуйте выйти на открытое место.');
+  } else if (!myLocation) {
+    showSnackbar('Геопозиция пока недоступна');
+  }
+}
+
+function maybeSendPresence(force) {
+  if (!uiPrefs.shareLocation || !myLocation || document.hidden) return;
+  if (!cloud.db || !cloud.fs || !uiPrefs.profile.id) return;
+  const now = Date.now();
+  if (now - (myLocation.at || 0) > PRESENCE_ONLINE_MS) return;
+  const since = now - lastPresenceAt;
+  const moved = lastPresenceSent ? distanceMeters(lastPresenceSent, myLocation) : Infinity;
+  if (!force) {
+    if (since < 5000) return;
+    if (since < PRESENCE_SEND_MS && moved < PRESENCE_MOVE_M) return;
+  }
+  if (presenceWriteBusy) {
+    presenceWritePending = true;
+    return;
+  }
+  const name = uiPrefs.profile.name;
+  if (!name) return;
+  const payload = {
+    name,
+    lat: Number(myLocation.lat.toFixed(6)),
+    lng: Number(myLocation.lng.toFixed(6)),
+    acc: Math.round(myLocation.acc || 0),
+    at: now,
+    upd: now
+  };
+  presenceWriteBusy = true;
+  lastPresenceAt = now;
+  lastPresenceSent = { lat: myLocation.lat, lng: myLocation.lng };
+
+  const docRef = cloud.fs.doc(cloud.db, 'groups', GROUP_ID, 'presence', uiPrefs.profile.id);
+  cloud.fs.setDoc(docRef, payload, { merge: true }).then(() => {
+    presenceTroubleShown = false;
+  }).catch((error) => {
+    console.warn('Не удалось отправить геопозицию', error);
+    if (!presenceTroubleShown) {
+      presenceTroubleShown = true;
+      showSnackbar('Геопозиция не отправляется — проверьте интернет');
+    }
+  }).then(() => {
+    presenceWriteBusy = false;
+    /* Пока запрос летел, пользователь мог выключить передачу — тогда
+       удаляем запись ещё раз, чтобы она не «всплыла» после удаления. */
+    if (!uiPrefs.shareLocation) {
+      presenceWritePending = false;
+      if (cloud.fs && cloud.db) {
+        const freshRef = cloud.fs.doc(cloud.db, 'groups', GROUP_ID, 'presence', uiPrefs.profile.id);
+        cloud.fs.deleteDoc(freshRef).catch(() => {});
+      }
+      return;
+    }
+    if (presenceWritePending) {
+      presenceWritePending = false;
+      maybeSendPresence();
+    }
+  });
+}
+
+function stopPresenceSend() {
+  lastPresenceAt = 0;
+  lastPresenceSent = null;
+  presenceWritePending = false;
+  if (cloud.db && cloud.fs && uiPrefs.profile.id) {
+    const docRef = cloud.fs.doc(cloud.db, 'groups', GROUP_ID, 'presence', uiPrefs.profile.id);
+    cloud.fs.deleteDoc(docRef).catch(() => {});
+  }
+}
+
+function updateShareUi() {
+  const on = !!uiPrefs.shareLocation;
+  const shareBtn = $('#btn-share');
+  if (shareBtn) {
+    shareBtn.classList.toggle('active', on);
+    shareBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    shareBtn.title = on ? 'Вы делитесь геопозицией' : 'Делиться геопозицией';
+    shareBtn.setAttribute('aria-label', shareBtn.title);
+  }
+  const settingsBtn = $('#btn-share-settings');
+  if (settingsBtn) {
+    settingsBtn.textContent = on ? 'Выключить передачу геопозиции' : 'Включить передачу геопозиции';
+    settingsBtn.classList.toggle('primary', on);
+  }
+  const hint = $('#share-hint');
+  if (hint) {
+    hint.textContent = on
+      ? 'Сейчас ваша позиция видна участникам, пока приложение открыто.'
+      : 'Позиция не передаётся. Включите, чтобы участники видели вас на карте.';
+  }
+  const consent = $('#share-consent');
+  if (consent && uiPrefs.shareAsked) consent.classList.add('hidden');
+}
+
+function maybeAskSharing() {
+  const consent = $('#share-consent');
+  if (!consent || uiPrefs.shareAsked || uiPrefs.shareLocation) return;
+  if (!uiPrefs.profile.name) return;
+  if (currentScreen !== 'map' || editMode || addMode) return;
+  consent.classList.remove('hidden');
+}
+
+function setShareEnabled(enabled, options) {
+  const opts = options || {};
+  const on = !!enabled;
+  if (on && !locationSupported()) {
+    showSnackbar('Геопозиция недоступна на этом устройстве');
+    return;
+  }
+  if (on && !uiPrefs.profile.name) {
+    ensureProfileName().then(() => {
+      if (uiPrefs.profile.name) setShareEnabled(true, opts);
+    });
+    return;
+  }
+  uiPrefs.shareLocation = on;
+  if (opts.ask !== false) uiPrefs.shareAsked = true;
+  savePrefs();
+  updateShareUi();
+  if (on) locationWanted = true;
+  refreshGeoWatch();
+  if (on) {
+    showSnackbar('Геопозиция видна участникам группы');
+    maybeSendPresence(true);
+    const consent = $('#share-consent');
+    if (consent) consent.classList.add('hidden');
+  } else {
+    stopPresenceSend();
+    showSnackbar('Геопозиция больше не передаётся');
+  }
+}
+
+function locateMe() {
+  if (!locationSupported()) {
+    showSnackbar('Геопозиция недоступна на этом устройстве');
+    return;
+  }
+  locationWanted = true;
+  refreshGeoWatch();
+  const btn = $('#btn-locate');
+  if (myLocation && map) {
+    map.setView([myLocation.lat, myLocation.lng], Math.max(map.getZoom(), 15), { animate: true });
+    return;
+  }
+  centerOnNextFix = true;
+  if (btn) btn.classList.add('locating');
+  clearTimeout(locateHintTimer);
+  locateHintTimer = setTimeout(() => {
+    if (!myLocation) {
+      if (btn) btn.classList.remove('locating');
+      showSnackbar('Ждём сигнал GPS. Проверьте, что доступ к геопозиции разрешён.');
+    }
+  }, 12000);
+}
+
+function startPresenceListener() {
+  if (!cloud.db || !cloud.fs || presenceUnsub) return;
+  try {
+    const col = cloud.fs.collection(cloud.db, 'groups', GROUP_ID, 'presence');
+    presenceUnsub = cloud.fs.onSnapshot(col, (snapshot) => {
+      const next = new Map();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        const lat = toNumber(data.lat);
+        const lng = toNumber(data.lng);
+        if (!isValidCoord(lat, lng)) return;
+        next.set(docSnap.id, {
+          name: normalizeProfileName(data.name) || 'Участник',
+          lat,
+          lng,
+          acc: toNumber(data.acc) || 0,
+          at: toNumber(data.at) || 0,
+          upd: toNumber(data.upd) || 0
+        });
+      });
+      presence = next;
+      renderPresence();
+    }, (error) => {
+      console.warn('Не удалось получить геопозиции участников', error);
+    });
+  } catch (error) {
+    console.warn('Геопозиции участников недоступны', error);
+  }
+}
+
 function updateAddUi() {
   const banner = $('#add-banner');
   if (banner) banner.classList.toggle('hidden', !addMode);
@@ -1345,6 +1822,8 @@ function updateAddUi() {
     editBtn.classList.toggle('is-active', editMode);
     editBtn.setAttribute('aria-pressed', editMode ? 'true' : 'false');
   }
+  const consent = $('#share-consent');
+  if (consent && (editMode || addMode)) consent.classList.add('hidden');
 }
 
 function setEditMode(on) {
@@ -1355,6 +1834,7 @@ function setEditMode(on) {
   showSnackbar(editMode
     ? 'Режим редактирования: перетаскивайте маркеры, нажмите на точку для изменения.'
     : 'Режим редактирования выключен');
+  if (!editMode) maybeAskSharing();
 }
 
 function setAddMode(on) {
@@ -1367,6 +1847,7 @@ function setAddMode(on) {
   } else {
     updateAddUi();
     renderMapMarkers();
+    maybeAskSharing();
   }
 }
 
@@ -1688,6 +2169,7 @@ function go(tab) {
   currentRoute = currentScreen === 'routes' ? currentRoute : null;
   uiPrefs.screen = currentScreen;
   savePrefs();
+  refreshGeoWatch();
 
   if (currentScreen === 'map') {
     showScreen('screen-map');
@@ -1697,8 +2179,12 @@ function go(tab) {
       map.invalidateSize();
       syncLocalSegments();
     }, 60);
+    maybeAskSharing();
     return;
   }
+
+  const consent = $('#share-consent');
+  if (consent) consent.classList.add('hidden');
 
   if (currentScreen === 'routes') {
     currentRoute = null;
@@ -2012,6 +2498,7 @@ function renderSettings() {
       (hiddenCount ? '<span>Скрыто: <b>' + hiddenCount + '</b></span>' : '');
   }
 
+  updateShareUi();
   updateSyncUi();
 }
 
@@ -3042,7 +3529,11 @@ async function initCloud(force) {
   if (cloud.db && !force) return;
   if (force) {
     try { if (cloud.unsub) cloud.unsub(); } catch (e) { /* ignore */ }
+    try { if (presenceUnsub) presenceUnsub(); } catch (e) { /* ignore */ }
     cloud.unsub = null;
+    presenceUnsub = null;
+    presence = new Map();
+    renderPresence();
     cloud.db = null;
     cloud.ref = null;
     cloud.ready = false;
@@ -3082,6 +3573,9 @@ async function initCloud(force) {
     cloud.db = db;
     cloud.ref = ref;
     cloud.fs = fsMod;
+
+    startPresenceListener();
+    if (uiPrefs.shareLocation) maybeSendPresence(true);
 
     cloud.unsub = fsMod.onSnapshot(ref, (snapshot) => {
       const data = snapshot.data() || {};
@@ -3286,6 +3780,34 @@ function bindEvents() {
   const fab = $('#fab-add');
   if (fab) fab.addEventListener('click', () => setAddMode(!addMode));
 
+  const locateBtn = $('#btn-locate');
+  if (locateBtn) locateBtn.addEventListener('click', locateMe);
+
+  const shareBtn = $('#btn-share');
+  if (shareBtn) shareBtn.addEventListener('click', () => setShareEnabled(!uiPrefs.shareLocation));
+
+  const shareSettings = $('#btn-share-settings');
+  if (shareSettings) shareSettings.addEventListener('click', () => setShareEnabled(!uiPrefs.shareLocation));
+
+  const consentYes = $('#share-consent-yes');
+  if (consentYes) consentYes.addEventListener('click', () => setShareEnabled(true));
+
+  const consentNo = $('#share-consent-no');
+  if (consentNo) consentNo.addEventListener('click', () => {
+    uiPrefs.shareAsked = true;
+    savePrefs();
+    const consent = $('#share-consent');
+    if (consent) consent.classList.add('hidden');
+  });
+
+  const peopleBar = $('#people-bar');
+  if (peopleBar) {
+    peopleBar.addEventListener('click', (event) => {
+      const chip = event.target.closest('[data-person]');
+      if (chip && chip.dataset.person) centerOnPerson(chip.dataset.person);
+    });
+  }
+
   const importBtn = $('#btn-import');
   if (importBtn) importBtn.addEventListener('click', openImportSheet);
 
@@ -3404,9 +3926,11 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
+    refreshGeoWatch();
     if (!document.hidden) {
       refreshAllMarkers();
       refreshCountsAndRoutes();
+      if (uiPrefs.shareLocation) maybeSendPresence(true);
     }
   });
 
@@ -3418,6 +3942,8 @@ function bindEvents() {
 function tick() {
   refreshAllMarkers();
   renderCounts();
+  if (map) renderPresence();
+  if (uiPrefs.shareLocation) maybeSendPresence();
   if (currentScreen === 'routes') renderRoutesList();
   if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
   if (sheetStoreId && openedSheetEl && openedSheetEl.id === 'store-sheet' && !formState) {
@@ -3485,7 +4011,9 @@ async function bootstrap() {
   await loadSeeds();
   hideBoot();
   updateSyncUi();
-  ensureProfileName();
+  updateShareUi();
+  refreshGeoWatch();
+  ensureProfileName().then(maybeAskSharing);
   initCloud();
 
   setInterval(tick, 60000);
