@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css?v=2.9.1">
+  <link rel="stylesheet" href="css/app.css?v=2.9.2">
 </head>
 <body>
 
@@ -124,6 +124,17 @@
       </button>
     </div>
 
+    <div id="tour-bar" class="tour-bar hidden" aria-label="Текущий объезд" aria-live="polite">
+      <button id="tour-focus" class="tour-bar-main" type="button" data-action="tour-focus" aria-label="Показать текущую точку объезда">
+        <span class="tour-bar-icon"><svg class="icon"><use href="#i-route"/></svg></span>
+        <span class="tour-bar-text">
+          <b id="tour-title">Объезд</b>
+          <span id="tour-target">Текущая точка</span>
+        </span>
+      </button>
+      <button id="tour-reset" class="mini-btn tour-reset" type="button" data-action="tour-reset">Сбросить</button>
+    </div>
+
     <div class="map-tools">
       <button id="btn-plan" class="map-tool plan-tool" type="button" title="Планирование маршрута" aria-label="Планирование маршрута">
         <svg class="icon"><use href="#i-route"/></svg>
@@ -149,14 +160,15 @@
       </div>
       <div id="plan-list" class="plan-list"></div>
       <div class="plan-tools">
-        <button id="plan-optimize" class="plan-tool-btn plan-tool-main" type="button" data-action="plan-optimize">Упорядочить</button>
+        <button id="plan-remember" class="plan-tool-btn plan-tool-main" type="button" data-action="plan-remember">Запомнить</button>
+        <button id="plan-optimize" class="plan-tool-btn" type="button" data-action="plan-optimize">Упорядочить</button>
         <button id="plan-clear" class="plan-tool-btn plan-danger" type="button" data-action="plan-clear">Очистить</button>
       </div>
       <div class="plan-foot">
         <span id="plan-distance" class="plan-distance">Нажмите на маркер или найдите точку</span>
         <a id="plan-yandex" class="plan-yandex hidden" href="#" target="_blank" rel="noopener">В Яндекс.Картах</a>
       </div>
-      <div class="plan-note">Линия на карте показывает порядок по прямой. Маршрут по дорогам построят Яндекс.Карты.</div>
+      <div class="plan-note">«Запомнить» запускает объезд: текущая точка мигает синим, остальные обведены. После визита метка переходит к следующей.</div>
     </div>
 
     <div id="people-bar" class="people-bar hidden" aria-label="Участники на карте"></div>
@@ -351,7 +363,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.9.1</span></p>
+            <p>Версия <span id="app-version">2.9.2</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -519,6 +531,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js?v=2.9.1" defer></script>
+<script src="js/app.js?v=2.9.2" defer></script>
 </body>
 </html>

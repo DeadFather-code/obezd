@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.9.1';
+const APP_VERSION = '2.9.2';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -83,7 +83,8 @@ let uiPrefs = {
   profile: { id: '', name: '' },
   shareLocation: false,
   shareAsked: false,
-  plan: []
+  plan: [],
+  tour: null
 };
 
 let mapStoresSeed = [];
@@ -123,6 +124,9 @@ let mapSearchQuery = '';
 let planLayer = null;
 let planLine = null;
 let planIconState = new Map();
+let tourLayer = null;
+let tourVisual = { activeId: null, pending: new Set() };
+let tourVisualKey = '';
 
 let sheetStoreId = null;
 let formState = null;
@@ -562,6 +566,13 @@ function loadLocal() {
       uiPrefs.plan = Array.isArray(prefs.plan)
         ? prefs.plan.filter(id => typeof id === 'string' && id).slice(0, 300)
         : [];
+      const savedTour = prefs.tour && typeof prefs.tour === 'object' ? prefs.tour : null;
+      const tourIds = savedTour && Array.isArray(savedTour.ids)
+        ? savedTour.ids.filter(id => typeof id === 'string' && id).slice(0, 300)
+        : [];
+      uiPrefs.tour = tourIds.length
+        ? { ids: tourIds, startedAt: toNumber(savedTour.startedAt) || Date.now() }
+        : null;
     }
   } catch (e) { /* ignore */ }
   if (!uiPrefs.profile.id) uiPrefs.profile.id = makeId('user');
@@ -856,6 +867,7 @@ function commit(options) {
   flushCommentSave();
   saveLocal();
   if (opts.structure) rebuildStoreCache();
+  rebuildTourVisual();
   if (map) {
     renderMapMarkers();
   }
@@ -867,6 +879,7 @@ function commit(options) {
   if (currentScreen === 'settings') renderSettings();
   if (sheetStoreId && getStore(sheetStoreId)) renderStoreSheet();
   if (opts.structure && map && !allStores.length) updateMapEmpty();
+  renderTourUi();
   localDirty = true;
   schedulePush();
 }
@@ -1256,10 +1269,11 @@ function markerIcon(store, planOrder) {
   const status = getStatus(store);
   const selected = selectedMarkerId === store.id ? ' selected' : '';
   const inPlan = planOrder ? ' in-plan' : '';
+  const tour = tourMarkerClass(store.id);
   const brand = store.brand === 'magnit' || store.brand === 'pyaterochka' ? store.brand : 'other';
   return L.divIcon({
     className: 'store-marker',
-    html: '<div class="map-pin ' + (status.due ? 'due' : 'ok') + selected + inPlan + '">' +
+    html: '<div class="map-pin ' + (status.due ? 'due' : 'ok') + selected + inPlan + tour + '">' +
       '<span class="pin-inner brand-' + brand + '">' + escapeHtml(brandLetter(store.brand)) + '</span>' +
       (planOrder ? '<span class="pin-num">' + planOrder + '</span>' : '') +
       '</div>',
@@ -1277,8 +1291,13 @@ function markerMatchesFilter(store) {
 
 function renderMapMarkers() {
   if (!map || !clusterLayers) return;
+  rebuildTourVisual();
 
   if (planMode) {
+    if (tourLayer) {
+      tourLayer.clearLayers();
+      if (map.hasLayer(tourLayer)) map.removeLayer(tourLayer);
+    }
     if (!planLayer) planLayer = L.layerGroup();
     if (!map.hasLayer(planLayer)) planLayer.addTo(map);
     planLayer.clearLayers();
@@ -1310,6 +1329,7 @@ function renderMapMarkers() {
 
     updatePlanLine();
     updateMapEmpty();
+    renderTourUi();
     return;
   }
 
@@ -1317,13 +1337,18 @@ function renderMapMarkers() {
   if (planLine && map.hasLayer(planLine)) map.removeLayer(planLine);
   planLine = null;
 
+  if (!tourLayer) tourLayer = L.layerGroup();
+  if (!map.hasLayer(tourLayer)) tourLayer.addTo(map);
+  tourLayer.clearLayers();
+
   clusterLayers.due.clearLayers();
   clusterLayers.ok.clearLayers();
   markers.clear();
 
   const stores = mapStores();
   for (const store of stores) {
-    if (!markerMatchesFilter(store)) continue;
+    const inTour = isTourPending(store.id);
+    if (!markerMatchesFilter(store) && !inTour) continue;
     const status = getStatus(store);
     const marker = L.marker([store.lat, store.lon], {
       icon: markerIcon(store),
@@ -1358,16 +1383,26 @@ function renderMapMarkers() {
     });
 
     markers.set(store.id, marker);
-    const group = clusterGroupFor(status.due);
-    if (group) group.addLayer(marker);
+    if (inTour) {
+      marker.setZIndexOffset(10000);
+      tourLayer.addLayer(marker);
+    } else {
+      const group = clusterGroupFor(status.due);
+      if (group) group.addLayer(marker);
+    }
   }
 
   refreshClusterLayers();
   updateMapEmpty();
+  renderTourUi();
 }
 
 function refreshAllMarkers() {
   if (!map) return;
+  if (rebuildTourVisual()) {
+    renderMapMarkers();
+    return;
+  }
   if (planMode) {
     const orders = planOrderMap();
     planIconState = orders;
@@ -1379,6 +1414,7 @@ function refreshAllMarkers() {
     }
     refreshMarkerSelection();
     updatePlanLine();
+    renderTourUi();
     return;
   }
   for (const [id, marker] of markers) {
@@ -1397,6 +1433,7 @@ function refreshAllMarkers() {
   }
   refreshClusterLayers();
   if (selectedMarkerId) refreshMarkerSelection();
+  renderTourUi();
 }
 
 function refreshMarkerSelection() {
@@ -1579,6 +1616,8 @@ function renderPlan() {
   if (optimize) optimize.disabled = stores.length < 3;
   const clear = $('#plan-clear');
   if (clear) clear.disabled = stores.length === 0;
+  const remember = $('#plan-remember');
+  if (remember) remember.disabled = stores.length === 0;
 }
 
 function refreshPlanMarkers() {
@@ -1710,6 +1749,170 @@ function clearPlan() {
     renderPlan();
     refreshPlanMarkers();
   });
+}
+
+/* --------------------------- Объезд по плану --------------------------- */
+
+function tourIds() {
+  return uiPrefs.tour && Array.isArray(uiPrefs.tour.ids) ? uiPrefs.tour.ids : [];
+}
+
+function syncTourState() {
+  if (!uiPrefs.tour) return false;
+  const ids = [];
+  const seen = new Set();
+  for (const id of tourIds()) {
+    if (seen.has(id)) continue;
+    const store = getStore(id);
+    if (!store || !isValidCoord(store.lat, store.lon)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  const current = tourIds();
+  if (!ids.length) {
+    uiPrefs.tour = null;
+    savePrefs();
+    return true;
+  }
+  if (ids.length !== current.length ||
+      ids.some((id, index) => id !== current[index]) ||
+      typeof uiPrefs.tour.startedAt !== 'number') {
+    uiPrefs.tour = { ids, startedAt: toNumber(uiPrefs.tour.startedAt) || Date.now() };
+    savePrefs();
+    return true;
+  }
+  return false;
+}
+
+function isTourPending(id) {
+  return !!id && tourVisual.pending.has(id);
+}
+
+function tourMarkerClass(id) {
+  if (!isTourPending(id)) return '';
+  return tourVisual.activeId === id ? ' tour-active' : ' tour-pending';
+}
+
+function rebuildTourVisual() {
+  syncTourState();
+  const pending = new Set();
+  let activeId = null;
+  for (const id of tourIds()) {
+    const store = getStore(id);
+    if (!store || !getStatus(store).due) continue;
+    pending.add(id);
+    if (!activeId) activeId = id;
+  }
+  tourVisual = { activeId, pending };
+  const key = (activeId || '') + '|' + Array.from(pending).sort().join(',');
+  const changed = key !== tourVisualKey;
+  tourVisualKey = key;
+  return changed;
+}
+
+function tourStats() {
+  const ids = tourIds();
+  let done = 0;
+  let activeId = null;
+  let index = 0;
+  ids.forEach((id, i) => {
+    const store = getStore(id);
+    if (!store) return;
+    if (getStatus(store).due) {
+      if (!activeId) {
+        activeId = id;
+        index = i + 1;
+      }
+      return;
+    }
+    done += 1;
+  });
+  return { total: ids.length, done, remaining: ids.length - done, activeId, index };
+}
+
+function renderTourUi() {
+  const bar = $('#tour-bar');
+  if (!bar) return;
+  if (!uiPrefs.tour) {
+    bar.classList.add('hidden');
+    return;
+  }
+  const stats = tourStats();
+  if (!stats.total) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  bar.classList.toggle('tour-done', !stats.activeId);
+  const title = $('#tour-title');
+  const target = $('#tour-target');
+  const focus = $('#tour-focus');
+  if (title) {
+    title.textContent = stats.activeId
+      ? 'Объезд · ' + stats.index + ' из ' + stats.total
+      : 'Объезд завершён · ' + stats.total + ' из ' + stats.total;
+  }
+  const store = stats.activeId ? getStore(stats.activeId) : null;
+  if (target) {
+    target.textContent = store
+      ? store.name + (store.address ? ' · ' + store.address : '')
+      : 'Все точки в норме';
+  }
+  if (focus) {
+    focus.disabled = !store;
+    focus.setAttribute('aria-label', store
+      ? 'Показать текущую точку объезда: ' + store.name
+      : 'Все точки объезда в норме');
+  }
+}
+
+function startTour() {
+  const stores = planStoreList();
+  if (!stores.length) {
+    showSnackbar('Сначала добавьте точки в план');
+    return;
+  }
+  const pending = stores.filter(store => getStatus(store).due);
+  if (!pending.length) {
+    showSnackbar('Все точки плана уже в норме');
+    return;
+  }
+
+  uiPrefs.tour = { ids: stores.map(store => store.id), startedAt: Date.now() };
+  savePrefs();
+  if (planMode) setPlanMode(false);
+  else if (map) renderMapMarkers();
+
+  const active = getStore(tourStats().activeId);
+  if (active && map) {
+    map.setView([active.lat, active.lon], Math.max(map.getZoom(), 14), { animate: true });
+  }
+  renderTourUi();
+  showSnackbar('Объезд начат · ' + pending.length + ' ' +
+    plural(pending.length, 'точка', 'точки', 'точек'));
+}
+
+function resetTour() {
+  if (!uiPrefs.tour) return;
+  const previous = uiPrefs.tour;
+  uiPrefs.tour = null;
+  savePrefs();
+  if (map) renderMapMarkers();
+  else renderTourUi();
+  showSnackbar('Объезд сброшен', 'Вернуть', () => {
+    uiPrefs.tour = previous;
+    savePrefs();
+    if (map) renderMapMarkers();
+    else renderTourUi();
+  });
+}
+
+function focusTourActive() {
+  rebuildTourVisual();
+  const store = getStore(tourVisual.activeId);
+  if (!store || !map) return;
+  highlightMarker(store.id);
+  map.setView([store.lat, store.lon], Math.max(map.getZoom(), 16), { animate: true });
 }
 
 function fitPlanBounds() {
@@ -3526,9 +3729,14 @@ function toggleStoreVisit(id, explicitMark) {
   if (!store) return;
   const mark = explicitMark == null ? getStatus(store).due : !!explicitMark;
   setStoreVisited(id, mark);
-  showSnackbar(mark ? 'Визит отмечен' : 'Отметка визита снята', mark ? 'Отменить' : 'Вернуть', () => {
-    setStoreVisited(id, !mark);
-  });
+  const tourFinished = mark && uiPrefs.tour && !tourStats().activeId;
+  showSnackbar(
+    tourFinished ? 'Объезд завершён · все точки в норме' : (mark ? 'Визит отмечен' : 'Отметка визита снята'),
+    mark ? 'Отменить' : 'Вернуть',
+    () => {
+      setStoreVisited(id, !mark);
+    }
+  );
 }
 
 async function deleteStoreById(id) {
@@ -4094,6 +4302,7 @@ function afterCloudApply() {
     }
   }
   applyBasemap();
+  renderTourUi();
 }
 
 function schedulePush() {
@@ -4355,8 +4564,17 @@ function handleAction(action, el) {
     case 'show-map':
       go('map');
       break;
+    case 'plan-remember':
+      startTour();
+      break;
     case 'plan-optimize':
       optimizePlanOrder();
+      break;
+    case 'tour-reset':
+      resetTour();
+      break;
+    case 'tour-focus':
+      focusTourActive();
       break;
     case 'plan-clear':
       clearPlan();
@@ -4780,8 +4998,10 @@ async function loadSeeds() {
   }
 
   renderCounts();
+  rebuildTourVisual();
   renderPlan();
   setMapFilter(mapFilter);
+  renderTourUi();
   if (map) {
     fitMapToStores();
   }
