@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.9.2';
+const APP_VERSION = '2.9.3';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -16,6 +16,7 @@ const ROUTE_NAMES = ['Ливны1', 'Ливны2', 'Залегощь', 'Кара
 const ORYOL_ROUTE = 'Орёл';
 const DAY_MS = 86400000;
 const COMMENT_MAX = 1000;
+const ALIAS_MAX = 60;
 const PROFILE_NAME_MAX = 40;
 
 /* Геопозиция: позиция пишется в отдельный документ участника. */
@@ -455,6 +456,13 @@ function sanitizeVersionMap(raw) {
   return out;
 }
 
+function normalizeAlias(value) {
+  return String(value == null ? '' : value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, ALIAS_MAX);
+}
+
 function sanitizeOverrides(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object') return out;
@@ -462,6 +470,7 @@ function sanitizeOverrides(raw) {
     if (!id || !value || typeof value !== 'object') continue;
     const rec = { upd: toNumber(value.upd) || Date.now() };
     if (typeof value.name === 'string') rec.name = value.name.slice(0, 80);
+    if (value.alias != null) rec.alias = normalizeAlias(value.alias);
     if (typeof value.brand === 'string') rec.brand = normalizeBrand(value.brand, value.name);
     if (typeof value.address === 'string') rec.address = value.address.slice(0, 200);
     if (value.period != null) {
@@ -494,6 +503,7 @@ function sanitizeCustom(raw) {
     const rec = {
       id,
       name: String(value.name || '').slice(0, 80),
+      alias: normalizeAlias(value.alias),
       brand: normalizeBrand(value.brand, value.name),
       address: String(value.address != null ? value.address : (value.addr || '')).slice(0, 200),
       lat: lat != null && lat > -90 && lat < 90 ? lat : null,
@@ -651,6 +661,7 @@ function composeStore(base) {
   return {
     id: base.id,
     name: storeDisplayName(brand, ov.name != null ? ov.name : src.name),
+    alias: normalizeAlias(ov.alias != null ? ov.alias : src.alias),
     brand,
     address: String(ov.address != null ? ov.address : (src.address != null ? src.address : (src.addr || ''))).trim(),
     lat: isValidCoord(lat, lon) ? lat : null,
@@ -681,6 +692,7 @@ function rebuildStoreCache() {
     const base = {
       id,
       name: rec.name,
+      alias: rec.alias,
       brand: rec.brand,
       address: rec.address,
       lat: rec.lat,
@@ -755,6 +767,40 @@ function flushCommentSave() {
     updateCommentMeta(pending.id);
     refreshCommentViews();
   }
+}
+
+function saveStoreAlias(id, rawAlias) {
+  if (!id) return false;
+  const alias = normalizeAlias(rawAlias);
+  const cached = storeCache.get(id);
+  const prev = cached && typeof cached.alias === 'string' ? cached.alias : '';
+  if (alias === prev) return false;
+  const rec = Object.assign({}, state.overrides[id] || {}, { alias, upd: Date.now() });
+  state.overrides[id] = rec;
+  if (cached) cached.alias = alias;
+  saveLocal();
+  localDirty = true;
+  schedulePush();
+  return true;
+}
+
+let aliasTimer = null;
+let aliasPending = null;
+
+function queueAliasSave(id, text) {
+  if (!id) return;
+  aliasPending = { id, text };
+  clearTimeout(aliasTimer);
+  aliasTimer = setTimeout(flushAliasSave, 600);
+}
+
+function flushAliasSave() {
+  clearTimeout(aliasTimer);
+  aliasTimer = null;
+  const pending = aliasPending;
+  aliasPending = null;
+  if (!pending) return;
+  saveStoreAlias(pending.id, pending.text);
 }
 
 function isKnownRoute(name) {
@@ -865,6 +911,7 @@ function setStoreVisited(id, mark) {
 function commit(options) {
   const opts = options || {};
   flushCommentSave();
+  flushAliasSave();
   saveLocal();
   if (opts.structure) rebuildStoreCache();
   rebuildTourVisual();
@@ -951,8 +998,7 @@ function initMap() {
 
   applyBasemap();
 
-  L.control.zoom({ position: 'topright' }).addTo(map);
-
+  /* Кнопки масштаба не показываем: на телефоне привычнее жесты. */
   clusterLayers = {
     ok: createClusterGroup('ok'),
     due: createClusterGroup('due')
@@ -1384,7 +1430,7 @@ function renderMapMarkers() {
 
     markers.set(store.id, marker);
     if (inTour) {
-      marker.setZIndexOffset(10000);
+      marker.setZIndexOffset(store.id === tourVisual.activeId ? 14000 : 10000);
       tourLayer.addLayer(marker);
     } else {
       const group = clusterGroupFor(status.due);
@@ -1833,35 +1879,32 @@ function tourStats() {
 function renderTourUi() {
   const bar = $('#tour-bar');
   if (!bar) return;
-  if (!uiPrefs.tour) {
-    bar.classList.add('hidden');
-    return;
-  }
-  const stats = tourStats();
-  if (!stats.total) {
+  const stats = uiPrefs.tour ? tourStats() : null;
+  if (!stats || !stats.total) {
     bar.classList.add('hidden');
     return;
   }
   bar.classList.remove('hidden');
   bar.classList.toggle('tour-done', !stats.activeId);
-  const title = $('#tour-title');
-  const target = $('#tour-target');
-  const focus = $('#tour-focus');
-  if (title) {
-    title.textContent = stats.activeId
-      ? 'Объезд · ' + stats.index + ' из ' + stats.total
-      : 'Объезд завершён · ' + stats.total + ' из ' + stats.total;
-  }
+
   const store = stats.activeId ? getStore(stats.activeId) : null;
-  if (target) {
-    target.textContent = store
+  const count = $('#tour-count');
+  const name = $('#tour-name');
+  const main = $('#tour-focus');
+  if (count) count.textContent = (store ? stats.index : stats.total) + '/' + stats.total;
+  if (name) {
+    name.textContent = store
       ? store.name + (store.address ? ' · ' + store.address : '')
-      : 'Все точки в норме';
+      : 'Готово · всё в норме';
   }
-  if (focus) {
-    focus.disabled = !store;
-    focus.setAttribute('aria-label', store
-      ? 'Показать текущую точку объезда: ' + store.name
+  if (main) {
+    const label = store
+      ? store.name + (store.address ? ' · ' + store.address : '')
+      : 'Все точки объезда в норме';
+    main.disabled = !store;
+    main.title = label;
+    main.setAttribute('aria-label', store
+      ? 'Показать текущую точку объезда: ' + label
       : 'Все точки объезда в норме');
   }
 }
@@ -1911,8 +1954,8 @@ function focusTourActive() {
   rebuildTourVisual();
   const store = getStore(tourVisual.activeId);
   if (!store || !map) return;
+  map.setView([store.lat, store.lon], Math.max(map.getZoom(), 15), { animate: true });
   highlightMarker(store.id);
-  map.setView([store.lat, store.lon], Math.max(map.getZoom(), 16), { animate: true });
 }
 
 function fitPlanBounds() {
@@ -2027,7 +2070,7 @@ function renderMapSearchResults() {
       hint.classList.remove('hidden');
       hint.textContent = planMode
         ? 'Введите адрес — найденная точка добавится в план.'
-        : 'Введите улицу, дом или название магазина.';
+        : 'Введите улицу, дом, название магазина или наше название.';
     }
     return;
   }
@@ -2038,7 +2081,7 @@ function renderMapSearchResults() {
       hint.classList.remove('hidden');
       hint.textContent = 'Ничего не найдено.';
     }
-    results.innerHTML = '<div class="search-empty">Проверьте улицу, дом или название магазина.</div>';
+    results.innerHTML = '<div class="search-empty">Проверьте улицу, дом, название магазина или наше название.</div>';
     return;
   }
 
@@ -2129,6 +2172,7 @@ function rankStores(stores, query) {
   for (const store of stores) {
     if (!store) continue;
     const name = normalizeSearchText(store.name);
+    const alias = normalizeSearchText(store.alias);
     const address = normalizeSearchText(store.address);
     const brand = normalizeSearchText(brandTitle(store.brand));
     const route = normalizeSearchText(store.route || ORYOL_ROUTE);
@@ -2139,6 +2183,8 @@ function rankStores(stores, query) {
       let best = 0;
       if (name.startsWith(token)) best = 6;
       else if (name.includes(token)) best = 5;
+      if (alias.startsWith(token)) best = Math.max(best, 8);
+      else if (alias.includes(token)) best = Math.max(best, 7);
       if (address.includes(token)) best = Math.max(best, 4);
       if (brand.includes(token)) best = Math.max(best, 3);
       if (route.includes(token)) best = Math.max(best, 2);
@@ -2151,6 +2197,7 @@ function rankStores(stores, query) {
 
     if (!matchedAll) continue;
     if (phrase && name.includes(phrase)) score += 4;
+    if (phrase && alias.includes(phrase)) score += 5;
     if (phrase && address.includes(phrase)) score += 3;
     ranked.push({ store, score });
   }
@@ -2168,11 +2215,14 @@ function searchResultHtml(store, kind) {
   const brand = store.brand === 'magnit' || store.brand === 'pyaterochka' ? store.brand : 'other';
   const routeLabel = store.route ? 'Маршрут «' + store.route + '»' : ORYOL_ROUTE + ' · на карте';
   const address = store.address ? escapeHtml(store.address) : 'Адрес не указан';
+  const alias = store.alias
+    ? '<span class="search-result-alias">· ' + escapeHtml(store.alias) + '</span>'
+    : '';
   return '<button class="search-result" type="button" data-result-kind="' + escapeHtml(kind) +
     '" data-result-id="' + escapeHtml(store.id) + '">' +
     '<span class="search-result-badge brand-' + brand + '">' + escapeHtml(brandLetter(store.brand)) + '</span>' +
     '<span class="search-result-main">' +
-      '<span class="search-result-name">' + escapeHtml(store.name) + '</span>' +
+      '<span class="search-result-name">' + escapeHtml(store.name) + alias + '</span>' +
       '<span class="search-result-addr' + (store.address ? '' : ' empty') + '">' + address + '</span>' +
       '<span class="search-result-route">' + escapeHtml(routeLabel) + '</span>' +
     '</span>' +
@@ -3199,7 +3249,7 @@ function renderRouteDetail(name) {
     if (query) {
       searchHint.textContent = matched.length
         ? 'Найдено ' + matched.length + ' ' + plural(matched.length, 'магазин', 'магазина', 'магазинов')
-        : 'Ничего не найдено. Проверьте улицу, дом или название.';
+        : 'Ничего не найдено. Проверьте улицу, дом, название или наше название.';
     }
   }
 
@@ -3250,7 +3300,7 @@ function renderRouteDetail(name) {
   const ok = [];
   matched.sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.address || '').localeCompare(b.address || '', 'ru'));
   if (query && !matched.length) {
-    listEl.innerHTML = '<div class="search-empty">Ничего не найдено в «Орле». Проверьте улицу, дом или название магазина.</div>';
+    listEl.innerHTML = '<div class="search-empty">Ничего не найдено в «Орле». Проверьте улицу, дом, название магазина или наше название.</div>';
     return;
   }
   for (const store of matched) {
@@ -3461,6 +3511,12 @@ function renderStoreSheet() {
       '<span class="status-pill ' + (status.due ? 'due' : 'ok') + '">' + (status.due ? 'Пора' : 'В норме') + '</span>' +
     '</div>' +
     '<div class="sheet-body">' +
+      '<label class="alias-row">' +
+        '<span class="alias-label">Наше название</span>' +
+        '<input id="store-alias" class="alias-input" type="text" maxlength="' + ALIAS_MAX +
+          '" value="' + escapeHtml(store.alias) + '" placeholder="Например, «у дома»" autocomplete="off"' +
+          ' spellcheck="false" aria-label="Наше название магазина">' +
+      '</label>' +
       '<button class="address-btn" type="button" data-action="edit-address" data-id="' + escapeHtml(store.id) + '">' +
         '<svg class="icon"><use href="#i-map"/></svg>' +
         '<span class="address-text' + (store.address ? '' : ' empty') + '">' + address + '</span>' +
@@ -3503,6 +3559,7 @@ function openStoreSheet(id) {
   const store = getStore(id);
   if (!store) return;
   flushCommentSave();
+  flushAliasSave();
   sheetStoreId = id;
   renderStoreSheet();
   openSheetEl($('#store-sheet'));
@@ -3529,6 +3586,7 @@ function openSheetEl(el) {
 
 function closeSheets() {
   flushCommentSave();
+  flushAliasSave();
   const backdrop = $('#sheet-backdrop');
   const el = openedSheetEl;
   openedSheetEl = null;
@@ -3586,6 +3644,9 @@ function openStoreForm(id, coords, route, options) {
 
   const addressInput = $('#f-address');
   if (addressInput) addressInput.value = store ? store.address : '';
+
+  const aliasInput = $('#f-alias');
+  if (aliasInput) aliasInput.value = store ? store.alias : '';
 
   const periodInput = $('#f-period');
   if (periodInput) periodInput.value = store && store.period ? String(store.period) : '';
@@ -3647,11 +3708,13 @@ function saveStoreForm(event) {
   if (!formState) return;
 
   const nameInput = $('#f-name');
+  const aliasInput = $('#f-alias');
   const addressInput = $('#f-address');
   const periodInput = $('#f-period');
 
   const brand = formState.brand || 'magnit';
   const name = (nameInput && nameInput.value.trim()) || brandTitle(brand);
+  const alias = normalizeAlias(aliasInput ? aliasInput.value : '');
   const address = addressInput ? addressInput.value.trim() : '';
 
   let period = null;
@@ -3676,6 +3739,7 @@ function saveStoreForm(event) {
     const prev = state.overrides[formState.id] || {};
     const next = Object.assign({}, prev, {
       name,
+      alias,
       brand,
       address,
       period,
@@ -3692,6 +3756,7 @@ function saveStoreForm(event) {
     state.custom[savedId] = {
       id: savedId,
       name,
+      alias,
       brand,
       address,
       lat: isRoute ? null : Number(formState.lat.toFixed(7)),
@@ -4293,8 +4358,8 @@ function afterCloudApply() {
   if (currentScreen === 'settings') renderSettings();
   if (sheetStoreId) {
     const active = document.activeElement;
-    if (active && active.id === 'store-comment' && getStore(sheetStoreId)) {
-      /* Не перерисовываем карточку, пока пользователь печатает комментарий. */
+    if (active && (active.id === 'store-comment' || active.id === 'store-alias') && getStore(sheetStoreId)) {
+      /* Не перерисовываем карточку, пока пользователь печатает. */
     } else if (getStore(sheetStoreId)) {
       renderStoreSheet();
     } else {
@@ -4631,13 +4696,20 @@ function bindEvents() {
 
   document.addEventListener('input', (event) => {
     const target = event.target;
-    if (!target || target.id !== 'store-comment') return;
+    if (!target) return;
+    if (target.id === 'store-alias') {
+      if (sheetStoreId) queueAliasSave(sheetStoreId, target.value);
+      return;
+    }
+    if (target.id !== 'store-comment') return;
     if (!sheetStoreId) return;
     queueCommentSave(sheetStoreId, target.value);
   });
 
   document.addEventListener('focusout', (event) => {
-    if (event.target && event.target.id === 'store-comment') flushCommentSave();
+    if (!event.target) return;
+    if (event.target.id === 'store-alias') flushAliasSave();
+    else if (event.target.id === 'store-comment') flushCommentSave();
   });
 
   document.addEventListener('keydown', (event) => {
@@ -4815,9 +4887,6 @@ function bindEvents() {
     });
   }
 
-  const importBtn = $('#btn-import');
-  if (importBtn) importBtn.addEventListener('click', openImportSheet);
-
   const importOsmSettings = $('#btn-import-osm');
   if (importOsmSettings) importOsmSettings.addEventListener('click', openImportSheet);
 
@@ -4955,7 +5024,7 @@ function tick() {
   if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
   if (sheetStoreId && openedSheetEl && openedSheetEl.id === 'store-sheet' && !formState) {
     const active = document.activeElement;
-    if (!active || active.id !== 'store-comment') renderStoreSheet();
+    if (!active || (active.id !== 'store-comment' && active.id !== 'store-alias')) renderStoreSheet();
   }
 }
 

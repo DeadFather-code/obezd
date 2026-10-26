@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css?v=2.9.2">
+  <link rel="stylesheet" href="css/app.css?v=2.9.3">
 </head>
 <body>
 
@@ -78,9 +78,6 @@
             <svg class="icon"><use href="#i-cloud"/></svg>
             <span class="basemap-mode">офлайн</span>
           </button>
-          <button id="btn-import" class="icon-btn" type="button" title="Загрузить магазины из OpenStreetMap" aria-label="Загрузить магазины из OpenStreetMap">
-            <svg class="icon"><use href="#i-download"/></svg>
-          </button>
         </div>
       </div>
       <div class="map-chips" role="group" aria-label="Фильтр по статусу">
@@ -126,13 +123,12 @@
 
     <div id="tour-bar" class="tour-bar hidden" aria-label="Текущий объезд" aria-live="polite">
       <button id="tour-focus" class="tour-bar-main" type="button" data-action="tour-focus" aria-label="Показать текущую точку объезда">
-        <span class="tour-bar-icon"><svg class="icon"><use href="#i-route"/></svg></span>
-        <span class="tour-bar-text">
-          <b id="tour-title">Объезд</b>
-          <span id="tour-target">Текущая точка</span>
-        </span>
+        <span id="tour-count" class="tour-count">0/0</span>
+        <span id="tour-name" class="tour-name">Текущая точка</span>
       </button>
-      <button id="tour-reset" class="mini-btn tour-reset" type="button" data-action="tour-reset">Сбросить</button>
+      <button id="tour-reset" class="tour-reset" type="button" data-action="tour-reset" aria-label="Сбросить объезд" title="Сбросить объезд">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
     </div>
 
     <div class="map-tools">
@@ -363,7 +359,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.9.2</span></p>
+            <p>Версия <span id="app-version">2.9.3</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -413,6 +409,12 @@
     <label class="field">
       <span>Название</span>
       <input id="f-name" type="text" maxlength="80" autocomplete="off" placeholder="Магнит">
+    </label>
+
+    <label class="field">
+      <span>Наше название</span>
+      <input id="f-alias" type="text" maxlength="60" autocomplete="off" placeholder="Например, «у дома»">
+      <small class="fine">Показывается рядом с названием и участвует в поиске.</small>
     </label>
 
     <div class="field">
@@ -531,6 +533,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js?v=2.9.2" defer></script>
+<script src="js/app.js?v=2.9.3" defer></script>
 </body>
 </html>
