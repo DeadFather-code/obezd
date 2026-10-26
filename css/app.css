@@ -969,6 +969,16 @@ b, strong {
   background: linear-gradient(90deg, #fbbf24, #f59e0b);
 }
 
+.route-last {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .route-foot {
   display: flex;
   align-items: center;
@@ -1197,6 +1207,17 @@ b, strong {
 .route-store-status.due { color: var(--green-text); }
 .route-store-status.ok { color: var(--red-text); }
 
+.route-store-author {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted-2);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .visit-btn {
   width: 40px;
   height: 40px;
@@ -1365,6 +1386,42 @@ b, strong {
 .period-value span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.profile-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.profile-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: rgba(9, 15, 27, 0.72);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.profile-row input::placeholder {
+  color: var(--muted-2);
+}
+
+.profile-row input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.13);
+}
+
+.profile-row .block {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 9px 14px;
 }
 
 .sync-box {
@@ -1833,6 +1890,18 @@ b, strong {
   line-height: 1.45;
 }
 
+.timer-author {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.timer-author b {
+  color: var(--text);
+  font-weight: 650;
+}
+
 .comment-card {
   display: flex;
   flex-direction: column;
@@ -1862,6 +1931,21 @@ b, strong {
   letter-spacing: 0.4px;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.comment-meta {
+  color: var(--muted-2);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.comment-meta:empty {
+  display: none;
+}
+
+.comment-meta b {
+  color: var(--muted);
+  font-weight: 650;
 }
 
 .comment-clear {
@@ -2250,7 +2334,8 @@ b, strong {
   color: var(--muted-2);
 }
 
-#modal-pass-input {
+#modal-pass-input,
+#modal-name-input {
   width: 100%;
   min-height: 44px;
   padding: 9px 12px;
@@ -2263,7 +2348,12 @@ b, strong {
   letter-spacing: 0.6px;
 }
 
-#modal-pass-input:focus {
+#modal-name-input {
+  letter-spacing: 0;
+}
+
+#modal-pass-input:focus,
+#modal-name-input:focus {
   outline: none;
   border-color: rgba(34, 197, 94, 0.55);
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.13);

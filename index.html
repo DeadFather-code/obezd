@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/app.css?v=2.7">
 </head>
 <body>
 
@@ -40,6 +40,7 @@
   <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 10v10h16V10"/><path d="M3 10 5 4h14l2 6"/><path d="M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r=".8"/><circle cx="3.5" cy="12" r=".8"/><circle cx="3.5" cy="18" r=".8"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-warning" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
 </svg>
 
@@ -153,6 +154,21 @@
 
       <section class="card">
         <div class="card-head">
+          <div class="card-icon icon-blue"><svg class="icon"><use href="#i-user"/></svg></div>
+          <div>
+            <h2>Ваше имя</h2>
+            <p>Им подписываются визиты и комментарии.</p>
+          </div>
+        </div>
+        <div class="profile-row">
+          <input id="profile-name-input" type="text" maxlength="40" autocomplete="name" autocapitalize="words" spellcheck="false" placeholder="Как вас зовут" aria-label="Ваше имя">
+          <button id="btn-profile-save" class="block" type="button">Сохранить</button>
+        </div>
+        <p id="profile-hint" class="fine">Имя хранится на этом устройстве. Его видят все участники группы.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
           <div class="card-icon icon-green"><svg class="icon"><use href="#i-clock"/></svg></div>
           <div>
             <h2>Периодичность визитов</h2>
@@ -246,7 +262,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.6</span></p>
+            <p>Версия <span id="app-version">2.7</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -387,6 +403,11 @@
   <div class="modal-card">
     <h3 id="modal-title">Подтверждение</h3>
     <p id="modal-text"></p>
+    <div id="modal-name" class="modal-pass hidden">
+      <label class="modal-pass-label" for="modal-name-input">Ваше имя</label>
+      <input id="modal-name-input" type="text" maxlength="40" autocomplete="name" autocapitalize="words" spellcheck="false" placeholder="Например, Андрей">
+      <p id="modal-name-error" class="modal-pass-error hidden">Введите имя.</p>
+    </div>
     <div id="modal-pass" class="modal-pass hidden">
       <label class="modal-pass-label" for="modal-pass-input">Пароль</label>
       <input id="modal-pass-input" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Введите пароль">
@@ -409,6 +430,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js" defer></script>
+<script src="js/app.js?v=2.7" defer></script>
 </body>
 </html>

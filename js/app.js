@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -16,6 +16,7 @@ const ROUTE_NAMES = ['Ливны1', 'Ливны2', 'Залегощь', 'Кара
 const ORYOL_ROUTE = 'Орёл';
 const DAY_MS = 86400000;
 const COMMENT_MAX = 1000;
+const PROFILE_NAME_MAX = 40;
 
 /* Пароль на опасные действия в настройках. Это защита от случайного
    нажатия, а не криптография: значение лежит в коде приложения. */
@@ -63,12 +64,13 @@ function emptyState() {
     hidden: {},
     custom: {},
     overrides: {},
-    comments: {}
+    comments: {},
+    authors: {}
   };
 }
 
 let state = emptyState();
-let uiPrefs = { screen: 'map', filter: 'all' };
+let uiPrefs = { screen: 'map', filter: 'all', profile: { id: '', name: '' } };
 
 let mapStoresSeed = [];
 let routeSeed = {};
@@ -117,7 +119,7 @@ let cloud = {
   online: false,
   failed: false,
   hasPushed: false,
-  pushed: { visits: {}, hidden: {}, custom: {}, overrides: {}, comments: {}, settings: null }
+  pushed: { visits: {}, hidden: {}, custom: {}, overrides: {}, comments: {}, authors: {}, settings: null }
 };
 let pushTimer = null;
 let pushInFlight = false;
@@ -228,6 +230,118 @@ function makeId(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
 }
 
+/* --------------------------- Профиль --------------------------- */
+
+function normalizeProfileName(value) {
+  return String(value == null ? '' : value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, PROFILE_NAME_MAX);
+}
+
+function sanitizeAuthor(value) {
+  if (!value || typeof value !== 'object') return null;
+  const id = typeof value.id === 'string' ? value.id.slice(0, 80) : '';
+  const name = normalizeProfileName(value.name);
+  if (!id && !name) return null;
+  return { id, name };
+}
+
+function currentAuthor() {
+  const profile = uiPrefs.profile;
+  if (!profile || !profile.name) return null;
+  if (!profile.id) {
+    profile.id = makeId('user');
+    savePrefs();
+  }
+  return { id: profile.id, name: profile.name };
+}
+
+function authorName(by) {
+  if (!by || typeof by !== 'object') return '';
+  const id = typeof by.id === 'string' ? by.id : '';
+  const saved = id ? state.authors[id] : null;
+  const name = saved && saved.name ? saved.name : by.name;
+  return normalizeProfileName(name);
+}
+
+function visitAuthor(id) {
+  const rec = id ? state.visits[id] : null;
+  return rec ? authorName(rec.by) : '';
+}
+
+function commentAuthor(id) {
+  const rec = id ? state.comments[id] : null;
+  return rec ? authorName(rec.by) : '';
+}
+
+function commentMetaHtml(id) {
+  const rec = id ? state.comments[id] : null;
+  if (!rec || !rec.text) return '';
+  return 'Автор: <b>' + escapeHtml(authorName(rec.by) || 'автор не указан') + '</b>' +
+    (rec.upd ? ' · ' + escapeHtml(formatDateTime(rec.upd)) : '');
+}
+
+function updateCommentMeta(id) {
+  const el = $('#store-comment-meta');
+  if (el) el.innerHTML = commentMetaHtml(id);
+}
+
+function saveProfileName(rawName) {
+  const name = normalizeProfileName(rawName);
+  if (!name) return false;
+  if (!uiPrefs.profile.id) uiPrefs.profile.id = makeId('user');
+  const changed = uiPrefs.profile.name !== name;
+  const now = Date.now();
+  uiPrefs.profile.name = name;
+  state.authors[uiPrefs.profile.id] = { name, upd: now };
+  savePrefs();
+  saveLocal();
+  localDirty = true;
+  schedulePush();
+  if (changed) {
+    if (currentScreen === 'settings') renderSettings();
+    if (currentScreen === 'routes') renderRoutesList();
+    if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
+    if (sheetStoreId) renderStoreSheet();
+  }
+  return true;
+}
+
+function saveProfileFromSettings() {
+  const input = $('#profile-name-input');
+  const name = normalizeProfileName(input ? input.value : '');
+  if (!name) {
+    showSnackbar('Введите имя');
+    if (input) {
+      try { input.focus(); } catch (e) { /* ignore */ }
+    }
+    return;
+  }
+  if (name === uiPrefs.profile.name) {
+    showSnackbar('Имя уже сохранено');
+    return;
+  }
+  saveProfileName(name);
+  if (input) input.blur();
+  showSnackbar('Имя сохранено: ' + name);
+}
+
+async function ensureProfileName() {
+  if (uiPrefs.profile.name) return;
+  const name = await nameDialog(
+    'Как вас зовут?',
+    'Имя нужно, чтобы подписывать визиты и комментарии. Его увидят участники группы, а изменить его можно в настройках.',
+    'Продолжить',
+    'Позже',
+    ''
+  );
+  if (name) {
+    saveProfileName(name);
+    showSnackbar('Вы вошли как ' + name);
+  }
+}
+
 function safeJsonParse(text) {
   try { return JSON.parse(text); } catch (e) { return null; }
 }
@@ -242,10 +356,13 @@ function sanitizeVisits(raw) {
     const at = toNumber(value.at != null ? value.at : value.visitedAt);
     const upd = toNumber(value.upd);
     if (at == null && upd == null) continue;
-    out[id] = {
+    const rec = {
       at: at && at > 0 ? at : null,
       upd: upd && upd > 0 ? upd : (at || Date.now())
     };
+    const by = sanitizeAuthor(value.by);
+    if (by) rec.by = by;
+    out[id] = rec;
   }
   return out;
 }
@@ -257,10 +374,26 @@ function sanitizeComments(raw) {
     if (!id || !value || typeof value !== 'object') continue;
     const text = String(value.text != null ? value.text : '').replace(/\r\n/g, '\n').slice(0, COMMENT_MAX);
     const upd = toNumber(value.upd);
-    out[id] = {
+    const rec = {
       text: text.trim(),
       upd: upd && upd > 0 ? upd : Date.now()
     };
+    const by = sanitizeAuthor(value.by);
+    if (by) rec.by = by;
+    out[id] = rec;
+  }
+  return out;
+}
+
+function sanitizeAuthors(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [id, value] of Object.entries(raw)) {
+    if (!id || !value || typeof value !== 'object') continue;
+    const name = normalizeProfileName(value.name);
+    if (!name) continue;
+    const upd = toNumber(value.upd);
+    out[id] = { name, upd: upd && upd > 0 ? upd : Date.now() };
   }
   return out;
 }
@@ -357,7 +490,8 @@ function sanitizeState(raw) {
     hidden: sanitizeVersionMap(src.hidden),
     custom: sanitizeCustom(src.custom),
     overrides: sanitizeOverrides(src.overrides),
-    comments: sanitizeComments(src.comments)
+    comments: sanitizeComments(src.comments),
+    authors: sanitizeAuthors(src.authors)
   };
 }
 
@@ -375,8 +509,17 @@ function loadLocal() {
     if (prefs && typeof prefs === 'object') {
       uiPrefs.screen = ['map', 'routes', 'settings'].includes(prefs.screen) ? prefs.screen : 'map';
       uiPrefs.filter = ['all', 'due', 'ok'].includes(prefs.filter) ? prefs.filter : 'all';
+      const savedProfile = prefs.profile && typeof prefs.profile === 'object' ? prefs.profile : {};
+      uiPrefs.profile = {
+        id: typeof savedProfile.id === 'string' ? savedProfile.id.slice(0, 80) : '',
+        name: normalizeProfileName(savedProfile.name)
+      };
     }
   } catch (e) { /* ignore */ }
+  if (!uiPrefs.profile.id) uiPrefs.profile.id = makeId('user');
+  if (uiPrefs.profile.name && !state.authors[uiPrefs.profile.id]) {
+    state.authors[uiPrefs.profile.id] = { name: uiPrefs.profile.name, upd: Date.now() };
+  }
   mapFilter = uiPrefs.filter;
 }
 
@@ -518,7 +661,10 @@ function saveComment(id, rawText) {
   const prev = state.comments[id];
   const prevText = prev && typeof prev.text === 'string' ? prev.text : '';
   if (text === prevText) return false;
-  state.comments[id] = { text, upd: Date.now() };
+  const rec = { text, upd: Date.now() };
+  const author = currentAuthor();
+  if (author) rec.by = author;
+  state.comments[id] = rec;
   saveLocal();
   localDirty = true;
   schedulePush();
@@ -546,7 +692,10 @@ function flushCommentSave() {
   const pending = commentPending;
   commentPending = null;
   if (!pending) return;
-  if (saveComment(pending.id, pending.text)) refreshCommentViews();
+  if (saveComment(pending.id, pending.text)) {
+    updateCommentMeta(pending.id);
+    refreshCommentViews();
+  }
 }
 
 function isKnownRoute(name) {
@@ -639,7 +788,14 @@ function storeStatusCounts(stores) {
 function touchVisit(id, mark) {
   if (!id) return;
   const now = Date.now();
-  state.visits[id] = mark ? { at: now, upd: now } : { at: null, upd: now };
+  if (!mark) {
+    state.visits[id] = { at: null, upd: now };
+    return;
+  }
+  const rec = { at: now, upd: now };
+  const author = currentAuthor();
+  if (author) rec.by = author;
+  state.visits[id] = rec;
 }
 
 function setStoreVisited(id, mark) {
@@ -1274,6 +1430,84 @@ function hideSnackbar() {
   if (bar) bar.classList.add('hidden');
 }
 
+function nameDialog(title, text, okLabel, cancelLabel, initial) {
+  return new Promise((resolve) => {
+    const modal = $('#modal');
+    const titleEl = $('#modal-title');
+    const textEl = $('#modal-text');
+    const okBtn = $('#modal-ok');
+    const cancelBtn = $('#modal-cancel');
+    const nameWrap = $('#modal-name');
+    const nameInput = $('#modal-name-input');
+    const nameError = $('#modal-name-error');
+    const passWrap = $('#modal-pass');
+    const passInput = $('#modal-pass-input');
+    if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !nameWrap || !nameInput) {
+      const answer = window.prompt(text, initial || '');
+      resolve(normalizeProfileName(answer) || null);
+      return;
+    }
+
+    titleEl.textContent = title;
+    textEl.textContent = text;
+    okBtn.textContent = okLabel || 'Продолжить';
+    okBtn.classList.remove('danger');
+    okBtn.classList.add('primary');
+    cancelBtn.textContent = cancelLabel || 'Отмена';
+    if (passWrap) passWrap.classList.add('hidden');
+    if (passInput) {
+      passInput.value = '';
+      passInput.onkeydown = null;
+    }
+    nameWrap.classList.remove('hidden');
+    nameInput.value = initial || '';
+    if (nameError) nameError.classList.add('hidden');
+    modal.classList.remove('hidden');
+    const focusTimer = setTimeout(() => {
+      try {
+        nameInput.focus();
+        nameInput.select();
+      } catch (e) { /* ignore */ }
+    }, 60);
+
+    const cleanup = () => {
+      clearTimeout(focusTimer);
+      modal.classList.add('hidden');
+      nameWrap.classList.add('hidden');
+      if (nameError) nameError.classList.add('hidden');
+      nameInput.value = '';
+      nameInput.onkeydown = null;
+      passInput && (passInput.onkeydown = null);
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.onclick = null;
+    };
+
+    const submit = () => {
+      const name = normalizeProfileName(nameInput.value);
+      if (!name) {
+        if (nameError) nameError.classList.remove('hidden');
+        try { nameInput.focus(); } catch (e) { /* ignore */ }
+        return;
+      }
+      cleanup();
+      resolve(name);
+    };
+
+    okBtn.onclick = submit;
+    nameInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      }
+    };
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    modal.onclick = (event) => {
+      if (event.target === modal) { cleanup(); resolve(null); }
+    };
+  });
+}
+
 function confirmDialog(title, text, okLabel, danger) {
   return new Promise((resolve) => {
     const modal = $('#modal');
@@ -1283,11 +1517,19 @@ function confirmDialog(title, text, okLabel, danger) {
     const cancelBtn = $('#modal-cancel');
     const passWrap = $('#modal-pass');
     const passInput = $('#modal-pass-input');
+    const nameWrap = $('#modal-name');
+    const nameInput = $('#modal-name-input');
     if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn) {
       resolve(window.confirm(text));
       return;
     }
 
+    cancelBtn.textContent = 'Отмена';
+    if (nameWrap) nameWrap.classList.add('hidden');
+    if (nameInput) {
+      nameInput.value = '';
+      nameInput.onkeydown = null;
+    }
     if (passWrap) passWrap.classList.add('hidden');
     if (passInput) {
       passInput.value = '';
@@ -1338,6 +1580,8 @@ function passwordDialog(title, text, okLabel, danger) {
     const passWrap = $('#modal-pass');
     const passInput = $('#modal-pass-input');
     const passError = $('#modal-pass-error');
+    const nameWrap = $('#modal-name');
+    const nameInput = $('#modal-name-input');
     if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !passWrap || !passInput) {
       resolve(passwordMatches(window.prompt(text, '')));
       return;
@@ -1348,6 +1592,12 @@ function passwordDialog(title, text, okLabel, danger) {
     okBtn.textContent = okLabel || 'Продолжить';
     okBtn.classList.toggle('danger', !!danger);
     okBtn.classList.toggle('primary', !danger);
+    cancelBtn.textContent = 'Отмена';
+    if (nameWrap) nameWrap.classList.add('hidden');
+    if (nameInput) {
+      nameInput.value = '';
+      nameInput.onkeydown = null;
+    }
     passWrap.classList.remove('hidden');
     passInput.value = '';
     if (passError) passError.classList.add('hidden');
@@ -1504,16 +1754,27 @@ function routeCardHtml(name, stores, counts) {
   const progress = stores.length ? Math.round((counts.ok / stores.length) * 100) : 0;
 
   let lastVisit = 0;
+  let lastStore = null;
   for (const store of stores) {
     const at = visitTime(store.id);
-    if (at && at > lastVisit) lastVisit = at;
+    if (at && at > lastVisit) {
+      lastVisit = at;
+      lastStore = store;
+    }
   }
 
   let footLeft;
   if (isEmpty) footLeft = isOryol ? 'На карте пока нет магазинов' : 'Добавьте магазины вручную';
   else if (counts.due) footLeft = counts.due + ' ' + plural(counts.due, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита';
-  else if (lastVisit) footLeft = 'Последний визит ' + formatDate(lastVisit);
-  else footLeft = 'Все магазины в норме';
+  else if (lastVisit) {
+    footLeft = 'Последний визит ' + formatDate(lastVisit) + ' · ' +
+      (lastStore ? visitAuthor(lastStore.id) || 'автор не указан' : 'автор не указан');
+  } else footLeft = 'Все магазины в норме';
+
+  const lastVisitLine = counts.due && lastVisit
+    ? '<div class="route-last">Последний визит ' + formatDate(lastVisit) + ' · ' +
+        escapeHtml(lastStore ? visitAuthor(lastStore.id) || 'автор не указан' : 'автор не указан') + '</div>'
+    : '';
 
   const icon = isOryol
     ? '<svg class="icon route-card-icon"><use href="#i-map"/></svg>'
@@ -1533,6 +1794,7 @@ function routeCardHtml(name, stores, counts) {
       '<span>' + escapeHtml(metaRight) + '</span>' +
     '</div>' +
     '<div class="route-progress"><i style="width:' + progress + '%"></i></div>' +
+    lastVisitLine +
     '<div class="route-foot">' +
       '<span>' + escapeHtml(footLeft) + '</span>' +
       '<span class="route-foot-right">Открыть <svg class="icon"><use href="#i-chevron"/></svg></span>' +
@@ -1660,7 +1922,14 @@ function renderRouteDetail(name) {
       const comment = commentFor(store.id);
       const flatComment = comment ? comment.replace(/\s+/g, ' ').trim() : '';
       const commentLine = flatComment
-        ? '<span class="route-store-comment">' + escapeHtml(flatComment.length > 90 ? flatComment.slice(0, 90).trimEnd() + '…' : flatComment) + '</span>'
+        ? '<span class="route-store-comment">' +
+            escapeHtml(flatComment.length > 90 ? flatComment.slice(0, 90).trimEnd() + '…' : flatComment) +
+            ' — ' + escapeHtml(commentAuthor(store.id) || 'автор не указан') +
+          '</span>'
+        : '';
+      const visitAuthorLine = status.at
+        ? '<span class="route-store-author">Последний визит: ' + formatDate(status.at) + ' · ' +
+            escapeHtml(visitAuthor(store.id) || 'автор не указан') + '</span>'
         : '';
       group += '<div class="route-store" data-action="open-store" data-id="' + escapeHtml(store.id) + '" role="button" tabindex="0">' +
         '<span class="status-dot ' + (status.due ? 'due' : 'ok') + '">' + brandMiniHtml(store.brand) + '</span>' +
@@ -1672,6 +1941,7 @@ function renderRouteDetail(name) {
             escapeHtml(routeStoreStatusText(store, status)) +
             (store.period ? ' · свой срок ' + store.period + ' дн.' : '') +
           '</span>' +
+          visitAuthorLine +
         '</div>' +
         '<button class="visit-btn ' + (status.due ? 'due' : 'ok') + '" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '"' +
           ' aria-label="' + (status.due ? 'Отметить визит' : 'Снять отметку визита') + '" title="' + (status.due ? 'Отметить визит' : 'Снять отметку') + '">' +
@@ -1693,6 +1963,17 @@ function renderRouteDetail(name) {
 /* --------------------------- Настройки --------------------------- */
 
 function renderSettings() {
+  const profileInput = $('#profile-name-input');
+  if (profileInput && document.activeElement !== profileInput) {
+    profileInput.value = uiPrefs.profile.name || '';
+  }
+  const profileHint = $('#profile-hint');
+  if (profileHint) {
+    profileHint.textContent = uiPrefs.profile.name
+      ? 'Сейчас: ' + uiPrefs.profile.name + '. Имя можно изменить в любой момент — ваши подписи обновятся.'
+      : 'Имя пока не выбрано. Визиты и комментарии будут без подписи, пока вы его не укажете.';
+  }
+
   const period = clampPeriod(state.settings.periodDays);
   const input = $('#period-input');
   const current = $('#period-current');
@@ -1794,11 +2075,16 @@ function renderStoreSheet() {
     ? escapeHtml(store.address)
     : 'Адрес не указан — нажмите, чтобы заполнить';
   const comment = commentFor(store.id);
+  const commentBy = commentMetaHtml(store.id);
 
   const progress = status.at ? Math.round(status.progress * 100) : 0;
   let timerSub = status.at
     ? 'Последний визит: ' + formatDate(status.at) + ' · ' + status.sub
     : 'Отметьте визит, когда приедете в магазин.';
+  const visitByLine = status.at
+    ? '<div class="timer-author">Последний посетитель: <b>' +
+        escapeHtml(visitAuthor(store.id) || 'автор не указан') + '</b></div>'
+    : '';
 
   let visitButton;
   if (status.due) {
@@ -1838,6 +2124,7 @@ function renderStoreSheet() {
         '</div>' +
         '<div class="timer-bar"><i style="width:' + progress + '%"></i></div>' +
         '<div class="timer-sub">' + escapeHtml(timerSub) + '</div>' +
+        visitByLine +
       '</div>' +
       '<div class="comment-card">' +
         '<div class="comment-head">' +
@@ -1847,6 +2134,7 @@ function renderStoreSheet() {
             ? '<button class="comment-clear" type="button" data-action="clear-comment" data-id="' + escapeHtml(store.id) + '">Очистить</button>'
             : '') +
         '</div>' +
+        (commentBy ? '<div id="store-comment-meta" class="comment-meta">' + commentBy + '</div>' : '<div id="store-comment-meta" class="comment-meta"></div>') +
         '<textarea id="store-comment" class="comment-input" rows="3" maxlength="' + COMMENT_MAX +
           '" placeholder="Заметка о точке или посещении">' + escapeHtml(comment) + '</textarea>' +
         '<div class="comment-hint">Сохраняется автоматически и остаётся, пока вы его не измените или не очистите.</div>' +
@@ -2134,8 +2422,11 @@ async function markWholeRoute(route) {
   );
   if (!ok) return;
   const now = Date.now();
+  const author = currentAuthor();
   for (const store of stores) {
-    state.visits[store.id] = { at: now, upd: now };
+    const rec = { at: now, upd: now };
+    if (author) rec.by = author;
+    state.visits[store.id] = rec;
   }
   commit();
   showSnackbar('Маршрут «' + route + '» отмечен');
@@ -2603,6 +2894,9 @@ function applyCloud(data) {
   if (src.comments2 && typeof src.comments2 === 'object') {
     if (mergeRecordMaps(state.comments, sanitizeComments(src.comments2))) changed = true;
   }
+  if (src.authors2 && typeof src.authors2 === 'object') {
+    if (mergeRecordMaps(state.authors, sanitizeAuthors(src.authors2))) changed = true;
+  }
   if (src.addresses && typeof src.addresses === 'object') {
     for (const [id, address] of Object.entries(src.addresses)) {
       if (!id || typeof address !== 'string') continue;
@@ -2671,77 +2965,76 @@ async function pushState() {
 
   const now = Date.now();
   const updates = {};
+  /* Снимок состояния на момент отправки: пока запрос летит, пользователь
+     может успеть изменить данные. Эти изменения нельзя считать отправленными. */
+  const snapshot = {
+    visits: clone(state.visits),
+    hidden: clone(state.hidden),
+    custom: clone(state.custom),
+    overrides: clone(state.overrides),
+    comments: clone(state.comments),
+    authors: clone(state.authors),
+    settings: clone(state.settings)
+  };
   const mapPrefixes = [
-    ['visits2', state.visits, cloud.pushed.visits],
-    ['hidden2', state.hidden, cloud.pushed.hidden],
-    ['custom2', state.custom, cloud.pushed.custom],
-    ['overrides2', state.overrides, cloud.pushed.overrides],
-    ['comments2', state.comments, cloud.pushed.comments]
+    ['visits2', snapshot.visits, cloud.pushed.visits],
+    ['hidden2', snapshot.hidden, cloud.pushed.hidden],
+    ['custom2', snapshot.custom, cloud.pushed.custom],
+    ['overrides2', snapshot.overrides, cloud.pushed.overrides],
+    ['comments2', snapshot.comments, cloud.pushed.comments],
+    ['authors2', snapshot.authors, cloud.pushed.authors]
   ];
 
-  for (const [prefix, current, previous] of mapPrefixes) {
-    for (const [id, rec] of Object.entries(current)) {
+  for (const [prefix, records, previous] of mapPrefixes) {
+    for (const [id, rec] of Object.entries(records)) {
       if (JSON.stringify(rec) !== JSON.stringify(previous[id])) {
-        updates[prefix + '.' + id] = rec;
+        if (!updates[prefix] || typeof updates[prefix] !== 'object') updates[prefix] = {};
+        updates[prefix][id] = rec;
       }
     }
   }
 
-  const settingsJson = JSON.stringify(state.settings);
+  const settingsJson = JSON.stringify(snapshot.settings);
   if (settingsJson !== JSON.stringify(cloud.pushed.settings)) {
-    updates.settings2 = state.settings;
+    updates.settings2 = snapshot.settings;
   }
 
   setSyncStatus('syncing', 'Сохранение…', 'Отправляем изменения группе');
 
   try {
-    if (!cloud.hasPushed) {
-      const payload = {
-        visits2: state.visits,
-        hidden2: state.hidden,
-        custom2: state.custom,
-        overrides2: state.overrides,
-        comments2: state.comments,
-        settings2: state.settings,
-        intervalDays: clampPeriod(state.settings.periodDays),
-        visits: {},
-        routes: {},
-        hidden: [],
-        custom: [],
-        addresses: {},
-        updatedAt: now
-      };
-      await cloud.fs.setDoc(cloud.ref, payload, { merge: true });
-      cloud.hasPushed = true;
-    } else if (Object.keys(updates).length) {
-      updates.intervalDays = clampPeriod(state.settings.periodDays);
+    /* Пишем только изменённые поля точечно. Полную карту отправлять нельзя:
+       на новом устройстве локальное состояние ещё пустое и перезаписало бы
+       визиты и комментарии, которые уже есть в облаке. */
+    if (!cloud.hasPushed || Object.keys(updates).length) {
+      updates.intervalDays = clampPeriod(snapshot.settings.periodDays);
       updates.updatedAt = now;
-      await cloud.fs.updateDoc(cloud.ref, updates);
+      await cloud.fs.setDoc(cloud.ref, updates, { merge: true });
+      cloud.hasPushed = true;
     }
 
-    cloud.pushed = {
-      visits: clone(state.visits),
-      hidden: clone(state.hidden),
-      custom: clone(state.custom),
-      overrides: clone(state.overrides),
-      comments: clone(state.comments),
-      settings: clone(state.settings)
-    };
+    cloud.pushed = snapshot;
     cloud.online = true;
     cloud.failed = false;
-    localDirty = false;
+    const liveJson = JSON.stringify([
+      state.visits, state.hidden, state.custom, state.overrides,
+      state.comments, state.authors, state.settings
+    ]);
+    const sentJson = JSON.stringify([
+      snapshot.visits, snapshot.hidden, snapshot.custom, snapshot.overrides,
+      snapshot.comments, snapshot.authors, snapshot.settings
+    ]);
+    localDirty = liveJson !== sentJson;
     updateSyncUi();
   } catch (error) {
     console.warn('Не удалось сохранить в облако', error);
     cloud.online = false;
     cloud.failed = true;
+    localDirty = true;
     updateSyncUi();
   } finally {
     pushInFlight = false;
-    if (pushAgain) {
-      pushAgain = false;
-      schedulePush();
-    }
+    if (pushAgain) pushAgain = false;
+    if (localDirty) schedulePush();
   }
 }
 
@@ -2756,7 +3049,7 @@ async function initCloud(force) {
     cloud.online = false;
     cloud.failed = false;
     cloud.hasPushed = false;
-    cloud.pushed = { visits: {}, hidden: {}, custom: {}, overrides: {}, comments: {}, settings: null };
+    cloud.pushed = { visits: {}, hidden: {}, custom: {}, overrides: {}, comments: {}, authors: {}, settings: null };
     localDirty = true;
   }
 
@@ -3038,6 +3331,19 @@ function bindEvents() {
   const periodMinus = $('#period-minus');
   if (periodMinus) periodMinus.addEventListener('click', () => changePeriod(clampPeriod(state.settings.periodDays) - 1));
 
+  const profileSave = $('#btn-profile-save');
+  if (profileSave) profileSave.addEventListener('click', saveProfileFromSettings);
+
+  const profileInput = $('#profile-name-input');
+  if (profileInput) {
+    profileInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveProfileFromSettings();
+      }
+    });
+  }
+
   const periodPlus = $('#period-plus');
   if (periodPlus) periodPlus.addEventListener('click', () => changePeriod(clampPeriod(state.settings.periodDays) + 1));
 
@@ -3179,6 +3485,7 @@ async function bootstrap() {
   await loadSeeds();
   hideBoot();
   updateSyncUi();
+  ensureProfileName();
   initCloud();
 
   setInterval(tick, 60000);
