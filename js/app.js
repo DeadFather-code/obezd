@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -82,7 +82,8 @@ let uiPrefs = {
   filter: 'all',
   profile: { id: '', name: '' },
   shareLocation: false,
-  shareAsked: false
+  shareAsked: false,
+  plan: []
 };
 
 let mapStoresSeed = [];
@@ -112,9 +113,16 @@ let selectedMarkerId = null;
 
 let currentScreen = 'map';
 let currentRoute = null;
+let oryolSearchQuery = '';
 let mapFilter = 'all';
 let editMode = false;
 let addMode = false;
+let planMode = false;
+let mapSearchOpen = false;
+let mapSearchQuery = '';
+let planLayer = null;
+let planLine = null;
+let planIconState = new Map();
 
 let sheetStoreId = null;
 let formState = null;
@@ -551,6 +559,9 @@ function loadLocal() {
       };
       uiPrefs.shareLocation = prefs.shareLocation === true;
       uiPrefs.shareAsked = prefs.shareAsked === true;
+      uiPrefs.plan = Array.isArray(prefs.plan)
+        ? prefs.plan.filter(id => typeof id === 'string' && id).slice(0, 300)
+        : [];
     }
   } catch (e) { /* ignore */ }
   if (!uiPrefs.profile.id) uiPrefs.profile.id = makeId('user');
@@ -849,6 +860,8 @@ function commit(options) {
     renderMapMarkers();
   }
   renderCounts();
+  updatePlanCount();
+  if (planMode) renderPlan();
   if (currentScreen === 'routes') renderRoutesList();
   if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
   if (currentScreen === 'settings') renderSettings();
@@ -873,7 +886,6 @@ function createClusterGroup(kind) {
         className: 'store-cluster ' + (isOk ? 'ok-cluster' : 'due-cluster'),
         html: '<div class="cluster' + (isOk ? ' ok' : '') + '">' +
           '<span>' + cluster.getChildCount() + '</span>' +
-          '<small>' + (isOk ? 'в норме' : 'пора') + '</small>' +
           '</div>',
         iconSize: [54, 54],
         iconAnchor: [27, 27]
@@ -908,10 +920,7 @@ function initMap() {
     maxZoom: 18
   }).setView([52.965, 36.075], 12);
 
-  L.control.attribution({ prefix: false, position: 'bottomright' }).addTo(map);
-  map.attributionControl.addAttribution(
-    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
-  );
+  /* Подпись об источнике карты есть в настройках, на карте не мешаем. */
 
   tileLight = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19
@@ -1201,7 +1210,26 @@ function updateLocalBasemap() {
   updateLocalLabels();
 }
 
+function updateBasemapToggleUi() {
+  const btn = $('#btn-basemap');
+  if (!btn) return;
+  const online = state.settings.basemap === 'light';
+  btn.classList.toggle('is-online', online);
+  btn.setAttribute('aria-pressed', online ? 'true' : 'false');
+  btn.setAttribute('aria-label', online
+    ? 'Сейчас включена онлайн-карта. Переключить на офлайн-схему'
+    : 'Сейчас включена офлайн-схема. Переключить на онлайн-карту');
+  btn.setAttribute('title', online
+    ? 'Онлайн-карта. Включить офлайн-схему'
+    : 'Офлайн-схема. Включить онлайн-карту');
+  const use = btn.querySelector('use');
+  if (use) use.setAttribute('href', online ? '#i-layers' : '#i-cloud');
+  const mode = btn.querySelector('.basemap-mode');
+  if (mode) mode.textContent = online ? 'онлайн' : 'офлайн';
+}
+
 function applyBasemap() {
+  updateBasemapToggleUi();
   if (!map) return;
   const mode = ['local', 'light'].includes(state.settings.basemap)
     ? state.settings.basemap
@@ -1224,14 +1252,16 @@ function applyBasemap() {
   container.classList.add('map-light');
 }
 
-function markerIcon(store) {
+function markerIcon(store, planOrder) {
   const status = getStatus(store);
   const selected = selectedMarkerId === store.id ? ' selected' : '';
+  const inPlan = planOrder ? ' in-plan' : '';
   const brand = store.brand === 'magnit' || store.brand === 'pyaterochka' ? store.brand : 'other';
   return L.divIcon({
     className: 'store-marker',
-    html: '<div class="map-pin ' + (status.due ? 'due' : 'ok') + selected + '">' +
+    html: '<div class="map-pin ' + (status.due ? 'due' : 'ok') + selected + inPlan + '">' +
       '<span class="pin-inner brand-' + brand + '">' + escapeHtml(brandLetter(store.brand)) + '</span>' +
+      (planOrder ? '<span class="pin-num">' + planOrder + '</span>' : '') +
       '</div>',
     iconSize: [38, 38],
     iconAnchor: [19, 19],
@@ -1247,6 +1277,45 @@ function markerMatchesFilter(store) {
 
 function renderMapMarkers() {
   if (!map || !clusterLayers) return;
+
+  if (planMode) {
+    if (!planLayer) planLayer = L.layerGroup();
+    if (!map.hasLayer(planLayer)) planLayer.addTo(map);
+    planLayer.clearLayers();
+    clusterLayers.due.clearLayers();
+    clusterLayers.ok.clearLayers();
+    markers.clear();
+
+    const orders = planOrderMap();
+    planIconState = orders;
+    for (const store of mapStores()) {
+      const status = getStatus(store);
+      const marker = L.marker([store.lat, store.lon], {
+        icon: markerIcon(store, orders.get(store.id)),
+        draggable: false,
+        keyboard: false,
+        title: store.name + (store.address ? ' — ' + store.address : ''),
+        storeDue: status.due,
+        storeId: store.id
+      });
+
+      marker.on('click', (event) => {
+        if (event && event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
+        onMarkerClick(store.id);
+      });
+
+      markers.set(store.id, marker);
+      planLayer.addLayer(marker);
+    }
+
+    updatePlanLine();
+    updateMapEmpty();
+    return;
+  }
+
+  if (planLayer && map.hasLayer(planLayer)) map.removeLayer(planLayer);
+  if (planLine && map.hasLayer(planLine)) map.removeLayer(planLine);
+  planLine = null;
 
   clusterLayers.due.clearLayers();
   clusterLayers.ok.clearLayers();
@@ -1299,6 +1368,19 @@ function renderMapMarkers() {
 
 function refreshAllMarkers() {
   if (!map) return;
+  if (planMode) {
+    const orders = planOrderMap();
+    planIconState = orders;
+    for (const [id, marker] of markers) {
+      const store = getStore(id);
+      if (!store) continue;
+      marker.options.storeDue = getStatus(store).due;
+      marker.setIcon(markerIcon(store, orders.get(id)));
+    }
+    refreshMarkerSelection();
+    updatePlanLine();
+    return;
+  }
   for (const [id, marker] of markers) {
     const store = getStore(id);
     if (!store) continue;
@@ -1351,6 +1433,483 @@ function updateMapEmpty() {
   empty.classList.add('hidden');
 }
 
+/* --------------------------- План маршрута --------------------------- */
+
+function planIds() {
+  return Array.isArray(uiPrefs.plan) ? uiPrefs.plan : [];
+}
+
+function planStoreList() {
+  const seen = new Set();
+  const list = [];
+  for (const id of planIds()) {
+    if (seen.has(id)) continue;
+    const store = getStore(id);
+    if (!store || !isValidCoord(store.lat, store.lon)) continue;
+    seen.add(id);
+    list.push(store);
+  }
+  return list;
+}
+
+function syncPlanIds() {
+  const stores = planStoreList();
+  const next = stores.map(store => store.id);
+  const current = planIds();
+  if (next.length !== current.length || next.some((id, index) => id !== current[index])) {
+    uiPrefs.plan = next;
+    savePrefs();
+  }
+  return stores;
+}
+
+function planOrderMap() {
+  const orders = new Map();
+  planStoreList().forEach((store, index) => orders.set(store.id, index + 1));
+  return orders;
+}
+
+function planDistanceMeters() {
+  const stores = planStoreList();
+  let total = 0;
+  for (let i = 1; i < stores.length; i += 1) {
+    total += storeDistanceMeters(stores[i - 1], stores[i]);
+  }
+  return total;
+}
+
+function storeDistanceMeters(a, b) {
+  if (!a || !b) return Infinity;
+  return distanceMeters({ lat: a.lat, lng: a.lon }, { lat: b.lat, lng: b.lon });
+}
+
+function formatDistanceKm(meters) {
+  const km = meters / 1000;
+  const value = km < 10 ? km.toFixed(1) : String(Math.round(km));
+  return value.replace('.', ',') + ' км';
+}
+
+function planYandexUrl() {
+  const stores = planStoreList();
+  if (stores.length < 2) return '';
+  const points = stores
+    .map(store => store.lat.toFixed(6) + ',' + store.lon.toFixed(6))
+    .join('~');
+  return 'https://yandex.ru/maps/?rtext=' + points + '&rtt=auto';
+}
+
+function updatePlanCount() {
+  const countEl = $('#plan-count');
+  if (!countEl) return;
+  const count = planStoreList().length;
+  countEl.textContent = String(count);
+  countEl.classList.toggle('hidden', count === 0);
+}
+
+function updatePlanLine() {
+  if (!map) return;
+  if (planLine) {
+    map.removeLayer(planLine);
+    planLine = null;
+  }
+  if (!planMode) return;
+  const stores = planStoreList();
+  if (stores.length < 2) return;
+  planLine = L.polyline(stores.map(store => [store.lat, store.lon]), {
+    color: '#38bdf8',
+    weight: 3,
+    opacity: 0.85,
+    dashArray: '7 8',
+    lineCap: 'round',
+    interactive: false
+  }).addTo(map);
+}
+
+function renderPlan() {
+  const listEl = $('#plan-list');
+  const stores = syncPlanIds();
+  updatePlanCount();
+  if (!listEl) return;
+
+  if (!stores.length) {
+    listEl.innerHTML = '<div class="plan-empty">Отметьте точки на карте или найдите адрес. Можно сразу добавить все магазины из группы «Пора».</div>';
+  } else {
+    listEl.innerHTML = stores.map((store, index) => {
+      const address = store.address ? escapeHtml(store.address) : 'Адрес не указан';
+      return '<div class="plan-item">' +
+        '<span class="plan-num">' + (index + 1) + '</span>' +
+        '<button class="plan-item-main" type="button" data-action="plan-focus" data-id="' + escapeHtml(store.id) + '">' +
+          '<span class="plan-item-name">' + escapeHtml(store.name) + '</span>' +
+          '<span class="plan-item-addr">' + address + '</span>' +
+        '</button>' +
+        '<span class="plan-item-tools">' +
+          '<button type="button" data-action="plan-up" data-id="' + escapeHtml(store.id) + '" aria-label="Переставить выше" title="Выше"' + (index === 0 ? ' disabled' : '') + '>↑</button>' +
+          '<button type="button" data-action="plan-down" data-id="' + escapeHtml(store.id) + '" aria-label="Переставить ниже" title="Ниже"' + (index === stores.length - 1 ? ' disabled' : '') + '>↓</button>' +
+          '<button class="plan-remove" type="button" data-action="plan-remove" data-id="' + escapeHtml(store.id) + '" aria-label="Убрать из плана" title="Убрать из плана">×</button>' +
+        '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  const distances = planDistanceMeters();
+  const summary = $('#plan-summary');
+  if (summary) {
+    summary.textContent = stores.length
+      ? stores.length + ' ' + plural(stores.length, 'точка', 'точки', 'точек') +
+        ' · ' + formatDistanceKm(distances) + ' по прямой'
+      : 'Точки не выбраны';
+  }
+
+  const distance = $('#plan-distance');
+  if (distance) {
+    distance.textContent = stores.length
+      ? 'По прямой: ' + formatDistanceKm(distances)
+      : 'Нажмите на маркер или найдите точку';
+  }
+
+  const yandex = $('#plan-yandex');
+  if (yandex) {
+    const url = planYandexUrl();
+    yandex.classList.toggle('hidden', !url);
+    if (url) yandex.href = url;
+    else yandex.removeAttribute('href');
+  }
+
+  const optimize = $('#plan-optimize');
+  if (optimize) optimize.disabled = stores.length < 3;
+  const clear = $('#plan-clear');
+  if (clear) clear.disabled = stores.length === 0;
+  const addDue = $('#plan-add-due');
+  if (addDue) {
+    const ids = new Set(stores.map(store => store.id));
+    addDue.disabled = !mapStores().some(store => getStatus(store).due && !ids.has(store.id));
+  }
+}
+
+function refreshPlanMarkers() {
+  if (!map) return;
+  if (!planMode) {
+    updatePlanCount();
+    return;
+  }
+  const orders = planOrderMap();
+  for (const [id, marker] of markers) {
+    const store = getStore(id);
+    if (!store) continue;
+    const next = orders.get(id) || 0;
+    const previous = planIconState.get(id) || 0;
+    if (next !== previous) marker.setIcon(markerIcon(store, next));
+  }
+  planIconState = orders;
+  refreshMarkerSelection();
+  updatePlanLine();
+}
+
+function addPlanStore(id, options) {
+  const store = getStore(id);
+  if (!store || !isValidCoord(store.lat, store.lon)) return false;
+  if (planIds().includes(store.id)) {
+    if (!options || options.quiet !== true) showSnackbar('Точка уже в плане');
+    return false;
+  }
+  if (planIds().length >= 300) {
+    showSnackbar('В плане уже 300 точек');
+    return false;
+  }
+  uiPrefs.plan = planIds().concat(store.id);
+  savePrefs();
+  renderPlan();
+  refreshPlanMarkers();
+  if (!options || options.quiet !== true) showSnackbar('В плане: ' + store.name);
+  return true;
+}
+
+function removePlanStore(id) {
+  const previous = planIds();
+  const next = previous.filter(item => item !== id);
+  if (next.length === previous.length) return;
+  uiPrefs.plan = next;
+  savePrefs();
+  renderPlan();
+  refreshPlanMarkers();
+}
+
+function togglePlanStore(id) {
+  if (planIds().includes(id)) removePlanStore(id);
+  else addPlanStore(id);
+}
+
+function movePlanStore(id, delta) {
+  const list = planIds().slice();
+  const index = list.indexOf(id);
+  if (index < 0) return;
+  const target = index + delta;
+  if (target < 0 || target >= list.length) return;
+  list.splice(index, 1);
+  list.splice(target, 0, id);
+  uiPrefs.plan = list;
+  savePrefs();
+  renderPlan();
+  refreshPlanMarkers();
+}
+
+function addDueToPlan() {
+  const existing = new Set(planIds());
+  const due = mapStores()
+    .filter(store => getStatus(store).due && !existing.has(store.id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru') ||
+      (a.address || '').localeCompare(b.address || '', 'ru'));
+  if (!due.length) {
+    showSnackbar('Все магазины «пора» уже в плане');
+    return;
+  }
+  const free = Math.max(0, 300 - planIds().length);
+  const added = due.slice(0, free);
+  uiPrefs.plan = planIds().concat(added.map(store => store.id));
+  savePrefs();
+  renderPlan();
+  refreshPlanMarkers();
+  showSnackbar('Добавлено в план: ' + added.length);
+}
+
+function optimizePlanOrder() {
+  const stores = planStoreList();
+  if (stores.length < 3) return;
+
+  const remaining = stores.slice(1);
+  const ordered = [stores[0]];
+  while (remaining.length) {
+    const last = ordered[ordered.length - 1];
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    remaining.forEach((store, index) => {
+      const distance = storeDistanceMeters(last, store);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+
+  let improved = true;
+  let guard = 0;
+  while (improved && guard < 30) {
+    improved = false;
+    guard += 1;
+    for (let i = 0; i < ordered.length - 1; i += 1) {
+      for (let j = i + 1; j < ordered.length; j += 1) {
+        const a = ordered[i];
+        const b = ordered[i + 1];
+        const c = ordered[j];
+        const d = ordered[j + 1];
+        const before = storeDistanceMeters(a, b) + (d ? storeDistanceMeters(c, d) : 0);
+        const after = storeDistanceMeters(a, c) + (d ? storeDistanceMeters(b, d) : 0);
+        if (after + 1 < before) {
+          const segment = ordered.slice(i + 1, j + 1).reverse();
+          ordered.splice(i + 1, segment.length, ...segment);
+          improved = true;
+        }
+      }
+    }
+  }
+
+  uiPrefs.plan = ordered.map(store => store.id);
+  savePrefs();
+  renderPlan();
+  refreshPlanMarkers();
+  showSnackbar('Порядок обновлён · ' + formatDistanceKm(planDistanceMeters()) + ' по прямой');
+}
+
+function clearPlan() {
+  const previous = planIds().slice();
+  if (!previous.length) return;
+  uiPrefs.plan = [];
+  savePrefs();
+  renderPlan();
+  refreshPlanMarkers();
+  showSnackbar('План очищен', 'Вернуть', () => {
+    uiPrefs.plan = previous;
+    savePrefs();
+    renderPlan();
+    refreshPlanMarkers();
+  });
+}
+
+function fitPlanBounds() {
+  if (!map) return;
+  const stores = planStoreList();
+  if (!stores.length) return;
+  if (stores.length === 1) {
+    map.setView([stores[0].lat, stores[0].lon], 16, { animate: true });
+    return;
+  }
+  map.fitBounds(L.latLngBounds(stores.map(store => [store.lat, store.lon])), {
+    padding: [70, 70],
+    maxZoom: 16,
+    animate: true
+  });
+}
+
+function setPlanMode(on) {
+  const next = !!on;
+  if (next === planMode) return;
+
+  if (next) {
+    if (editMode || addMode) {
+      editMode = false;
+      addMode = false;
+      updateAddUi();
+    }
+    closeMapSearch();
+    closeSheets();
+  }
+
+  planMode = next;
+  const screen = $('#screen-map');
+  if (screen) screen.classList.toggle('plan-mode', planMode);
+  const panel = $('#plan-panel');
+  if (panel) panel.classList.toggle('hidden', !planMode);
+  const btn = $('#btn-plan');
+  if (btn) {
+    btn.classList.toggle('active', planMode);
+    btn.setAttribute('aria-pressed', planMode ? 'true' : 'false');
+  }
+
+  renderMapMarkers();
+  renderPlan();
+  if (planMode) {
+    fitPlanBounds();
+    showSnackbar('План: нажимайте на маркеры, чтобы добавить или убрать точки');
+  } else {
+    maybeAskSharing();
+  }
+}
+
+/* --------------------------- Поиск на карте --------------------------- */
+
+function setMapSearchOpen(on) {
+  const next = !!on;
+  if (next === mapSearchOpen) {
+    if (next) {
+      const currentInput = $('#map-search-input');
+      if (currentInput) currentInput.focus();
+    }
+    return;
+  }
+  mapSearchOpen = next;
+
+  const panel = $('#map-search-panel');
+  if (panel) panel.classList.toggle('hidden', !next);
+  const openBtn = $('#map-search-open');
+  if (openBtn) openBtn.setAttribute('aria-expanded', next ? 'true' : 'false');
+  const input = $('#map-search-input');
+  const results = $('#map-search-results');
+  const hint = $('#map-search-hint');
+
+  if (next) {
+    if (editMode || addMode) {
+      editMode = false;
+      addMode = false;
+      updateAddUi();
+      renderMapMarkers();
+    }
+    mapSearchQuery = '';
+    if (input) input.value = '';
+    renderMapSearchResults();
+    setTimeout(() => {
+      try { if (input) input.focus(); } catch (e) { /* ignore */ }
+    }, 40);
+    return;
+  }
+
+  mapSearchQuery = '';
+  if (input) input.value = '';
+  if (results) results.innerHTML = '';
+  if (hint) hint.classList.add('hidden');
+}
+
+function closeMapSearch() {
+  setMapSearchOpen(false);
+}
+
+function renderMapSearchResults() {
+  const results = $('#map-search-results');
+  const hint = $('#map-search-hint');
+  const clearBtn = $('#map-search-clear');
+  const query = mapSearchQuery.trim();
+
+  if (clearBtn) clearBtn.classList.toggle('hidden', !mapSearchQuery);
+  if (!results) return;
+
+  if (!query) {
+    results.innerHTML = '';
+    if (hint) {
+      hint.classList.remove('hidden');
+      hint.textContent = planMode
+        ? 'Введите адрес — найденная точка добавится в план.'
+        : 'Введите улицу, дом или название магазина.';
+    }
+    return;
+  }
+
+  const found = rankStores(mapStores(), query);
+  if (!found.length) {
+    if (hint) {
+      hint.classList.remove('hidden');
+      hint.textContent = 'Ничего не найдено.';
+    }
+    results.innerHTML = '<div class="search-empty">Проверьте улицу, дом или название магазина.</div>';
+    return;
+  }
+
+  const shown = found.slice(0, 12);
+  if (hint) {
+    hint.classList.remove('hidden');
+    hint.textContent = 'Найдено ' + found.length + ' ' +
+      plural(found.length, 'магазин', 'магазина', 'магазинов') +
+      (found.length > shown.length ? ' · показаны первые ' + shown.length : '') +
+      (planMode ? ' · нажмите, чтобы добавить в план' : '');
+  }
+  results.innerHTML = shown.map(store => searchResultHtml(store, 'map')).join('');
+}
+
+function handleMapSearchResult(id) {
+  const store = getStore(id);
+  if (!store) return;
+
+  if (planMode) {
+    const added = addPlanStore(id, { quiet: true });
+    if (added) {
+      mapSearchQuery = '';
+      const input = $('#map-search-input');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      renderMapSearchResults();
+      showSnackbar('В плане: ' + store.name);
+    } else {
+      showSnackbar('Точка уже в плане');
+    }
+    return;
+  }
+
+  closeMapSearch();
+  if (!map) return;
+  if (!markerMatchesFilter(store)) setMapFilter('all');
+  highlightMarker(store.id);
+  map.setView([store.lat, store.lon], Math.max(map.getZoom(), 16), { animate: true });
+  openStoreSheet(store.id);
+}
+
+function focusPlanStore(id) {
+  const store = getStore(id);
+  if (!store || !map) return;
+  highlightMarker(store.id);
+  map.setView([store.lat, store.lon], Math.max(map.getZoom(), 16), { animate: true });
+}
+
 function setMapFilter(filter) {
   mapFilter = ['all', 'due', 'ok'].includes(filter) ? filter : 'all';
   uiPrefs.filter = mapFilter;
@@ -1370,6 +1929,82 @@ function fitMapToStores() {
   }
   const bounds = L.latLngBounds(stores.map(s => [s.lat, s.lon]));
   map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+}
+
+/* --------------------------- Поиск --------------------------- */
+
+function normalizeSearchText(value) {
+  return String(value == null ? '' : value)
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .trim();
+}
+
+function rankStores(stores, query) {
+  const phrase = normalizeSearchText(query);
+  const tokens = Array.from(new Set(phrase.split(' ').filter(Boolean)));
+  if (!tokens.length) return [];
+
+  const ranked = [];
+  for (const store of stores) {
+    if (!store) continue;
+    const name = normalizeSearchText(store.name);
+    const address = normalizeSearchText(store.address);
+    const brand = normalizeSearchText(brandTitle(store.brand));
+    const route = normalizeSearchText(store.route || ORYOL_ROUTE);
+    let score = 0;
+    let matchedAll = true;
+
+    for (const token of tokens) {
+      let best = 0;
+      if (name.startsWith(token)) best = 6;
+      else if (name.includes(token)) best = 5;
+      if (address.includes(token)) best = Math.max(best, 4);
+      if (brand.includes(token)) best = Math.max(best, 3);
+      if (route.includes(token)) best = Math.max(best, 2);
+      if (!best) {
+        matchedAll = false;
+        break;
+      }
+      score += best;
+    }
+
+    if (!matchedAll) continue;
+    if (phrase && name.includes(phrase)) score += 4;
+    if (phrase && address.includes(phrase)) score += 3;
+    ranked.push({ store, score });
+  }
+
+  ranked.sort((a, b) =>
+    b.score - a.score ||
+    a.store.name.localeCompare(b.store.name, 'ru') ||
+    (a.store.address || '').localeCompare(b.store.address || '', 'ru'));
+  return ranked.map(item => item.store);
+}
+
+function searchResultHtml(store, kind) {
+  const status = getStatus(store);
+  const inPlan = planIds().includes(store.id);
+  const brand = store.brand === 'magnit' || store.brand === 'pyaterochka' ? store.brand : 'other';
+  const routeLabel = store.route ? 'Маршрут «' + store.route + '»' : ORYOL_ROUTE + ' · на карте';
+  const address = store.address ? escapeHtml(store.address) : 'Адрес не указан';
+  return '<button class="search-result" type="button" data-result-kind="' + escapeHtml(kind) +
+    '" data-result-id="' + escapeHtml(store.id) + '">' +
+    '<span class="search-result-badge brand-' + brand + '">' + escapeHtml(brandLetter(store.brand)) + '</span>' +
+    '<span class="search-result-main">' +
+      '<span class="search-result-name">' + escapeHtml(store.name) + '</span>' +
+      '<span class="search-result-addr' + (store.address ? '' : ' empty') + '">' + address + '</span>' +
+      '<span class="search-result-route">' + escapeHtml(routeLabel) + '</span>' +
+    '</span>' +
+    '<span class="search-result-meta">' +
+      (inPlan
+        ? '<span class="search-result-plan">В плане</span>'
+        : '<span class="search-result-status ' + (status.due ? 'due' : 'ok') + '">' +
+            (status.due ? 'Пора' : 'В норме') +
+          '</span>') +
+    '</span>' +
+  '</button>';
 }
 
 /* ------------------------- Геопозиция ------------------------- */
@@ -1538,10 +2173,15 @@ function renderPeopleBar() {
   items.sort((a, b) => (b.rec.at || 0) - (a.rec.at || 0));
   bar.innerHTML = items.map(({ uid, rec }) => {
     const online = now - (rec.at || 0) <= PRESENCE_ONLINE_MS;
+    const name = rec.name || 'Участник';
+    const ago = presenceAgoText(rec.at);
+    const initial = name.trim().slice(0, 1).toUpperCase() || '•';
     return '<button class="person-chip' + (online ? ' online' : '') + '" type="button" data-person="' +
-      escapeHtml(uid) + '" title="' + escapeHtml(rec.name || 'Участник') + '">' +
-      '<span class="dot"></span><span>' + escapeHtml(rec.name || 'Участник') + '</span>' +
-      '<small>' + escapeHtml(presenceAgoText(rec.at)) + '</small></button>';
+      escapeHtml(uid) + '" style="--hue:' + presenceHue(uid) + '" title="' + escapeHtml(name + ' · ' + ago) +
+      '" aria-label="Показать на карте: ' + escapeHtml(name + ', ' + ago) + '">' +
+      '<span class="person-avatar">' + escapeHtml(initial) + '</span>' +
+      '<span class="person-name">' + escapeHtml(name) + '</span>' +
+      '<small>' + escapeHtml(ago) + '</small></button>';
   }).join('');
   bar.classList.remove('hidden');
 }
@@ -1827,6 +2467,10 @@ function updateAddUi() {
 }
 
 function setEditMode(on) {
+  if (on) {
+    closeMapSearch();
+    if (planMode) setPlanMode(false);
+  }
   editMode = !!on;
   if (editMode) setAddMode(false);
   updateAddUi();
@@ -1838,6 +2482,10 @@ function setEditMode(on) {
 }
 
 function setAddMode(on) {
+  if (on) {
+    closeMapSearch();
+    if (planMode) setPlanMode(false);
+  }
   addMode = !!on;
   if (addMode) {
     editMode = false;
@@ -1852,6 +2500,7 @@ function setAddMode(on) {
 }
 
 function onMapClick(event) {
+  if (planMode) return;
   if (!addMode || !event || !event.latlng) return;
   const lat = Number(event.latlng.lat.toFixed(7));
   const lon = Number(event.latlng.lng.toFixed(7));
@@ -1864,6 +2513,11 @@ function onMapClick(event) {
 function onMarkerClick(id) {
   const store = getStore(id);
   if (!store) return;
+
+  if (planMode) {
+    togglePlanStore(id);
+    return;
+  }
 
   if (editMode) {
     openStoreForm(id, null, store.route);
@@ -2188,6 +2842,7 @@ function go(tab) {
 
   if (currentScreen === 'routes') {
     currentRoute = null;
+    oryolSearchQuery = '';
     showScreen('screen-routes');
     setActiveTab('routes');
     renderRoutesList();
@@ -2203,6 +2858,7 @@ function openRoute(name) {
   if (!isKnownRoute(name)) return;
   currentRoute = name;
   currentScreen = 'route';
+  oryolSearchQuery = '';
   showScreen('screen-route');
   setActiveTab('routes');
   renderRouteDetail(name);
@@ -2345,6 +3001,29 @@ function renderRouteDetail(name) {
   const routeAdd = $('#route-add');
   if (routeAdd) routeAdd.classList.toggle('hidden', isOryol);
 
+  const query = isOryol ? oryolSearchQuery.trim() : '';
+  const matched = query ? rankStores(stores, query) : stores;
+  const searchEl = $('#oryol-search');
+  const searchInput = $('#oryol-search-input');
+  const searchClear = $('#oryol-search-clear');
+  const searchHint = $('#oryol-search-hint');
+  if (searchEl) searchEl.classList.toggle('hidden', !isOryol || !stores.length);
+  if (searchInput) {
+    const nextValue = isOryol ? oryolSearchQuery : '';
+    if (document.activeElement !== searchInput || searchInput.value !== nextValue) {
+      searchInput.value = nextValue;
+    }
+  }
+  if (searchClear) searchClear.classList.toggle('hidden', !query);
+  if (searchHint) {
+    searchHint.classList.toggle('hidden', !query);
+    if (query) {
+      searchHint.textContent = matched.length
+        ? 'Найдено ' + matched.length + ' ' + plural(matched.length, 'магазин', 'магазина', 'магазинов')
+        : 'Ничего не найдено. Проверьте улицу, дом или название.';
+    }
+  }
+
   if (titleEl) titleEl.textContent = name;
   if (subEl) {
     if (isOryol) {
@@ -2390,8 +3069,12 @@ function renderRouteDetail(name) {
 
   const due = [];
   const ok = [];
-  stores.sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.address || '').localeCompare(b.address || '', 'ru'));
-  for (const store of stores) {
+  matched.sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.address || '').localeCompare(b.address || '', 'ru'));
+  if (query && !matched.length) {
+    listEl.innerHTML = '<div class="search-empty">Ничего не найдено в «Орле». Проверьте улицу, дом или название магазина.</div>';
+    return;
+  }
+  for (const store of matched) {
     const status = getStatus(store);
     (status.due ? due : ok).push({ store, status });
   }
@@ -3696,6 +4379,27 @@ function handleAction(action, el) {
     case 'show-map':
       go('map');
       break;
+    case 'plan-add-due':
+      addDueToPlan();
+      break;
+    case 'plan-optimize':
+      optimizePlanOrder();
+      break;
+    case 'plan-clear':
+      clearPlan();
+      break;
+    case 'plan-up':
+      if (id) movePlanStore(id, -1);
+      break;
+    case 'plan-down':
+      if (id) movePlanStore(id, 1);
+      break;
+    case 'plan-remove':
+      if (id) removePlanStore(id);
+      break;
+    case 'plan-focus':
+      if (id) focusPlanStore(id);
+      break;
     default:
       break;
   }
@@ -3711,6 +4415,13 @@ function bindEvents() {
 
     if (event.target.closest('[data-open-add]')) {
       setAddMode(true);
+      return;
+    }
+
+    const resultEl = event.target.closest('[data-result-kind]');
+    if (resultEl) {
+      event.preventDefault();
+      handleMapSearchResult(resultEl.dataset.resultId);
       return;
     }
 
@@ -3746,6 +4457,26 @@ function bindEvents() {
         if (cancel) cancel.click();
         return;
       }
+      if (openedSheetEl) {
+        closeSheets();
+        return;
+      }
+      if (mapSearchOpen) {
+        closeMapSearch();
+        return;
+      }
+      if (planMode) {
+        setPlanMode(false);
+        return;
+      }
+      if (editMode) {
+        setEditMode(false);
+        return;
+      }
+      if (addMode) {
+        setAddMode(false);
+        return;
+      }
       closeSheets();
       return;
     }
@@ -3765,8 +4496,93 @@ function bindEvents() {
     chip.addEventListener('click', () => setMapFilter(chip.dataset.filter));
   });
 
-  const fitBtn = $('#btn-fit');
-  if (fitBtn) fitBtn.addEventListener('click', fitMapToStores);
+  const oryolSearchInput = $('#oryol-search-input');
+  const oryolSearchClear = $('#oryol-search-clear');
+  if (oryolSearchInput) {
+    oryolSearchInput.addEventListener('input', () => {
+      oryolSearchQuery = oryolSearchInput.value;
+      if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
+    });
+    oryolSearchInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      oryolSearchQuery = '';
+      oryolSearchInput.value = '';
+      if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
+      oryolSearchInput.blur();
+    });
+  }
+  if (oryolSearchClear && oryolSearchInput) {
+    oryolSearchClear.addEventListener('click', () => {
+      oryolSearchQuery = '';
+      oryolSearchInput.value = '';
+      if (currentScreen === 'route' && currentRoute) renderRouteDetail(currentRoute);
+      oryolSearchInput.focus();
+    });
+  }
+
+  const mapSearchOpenBtn = $('#map-search-open');
+  const mapSearchInput = $('#map-search-input');
+  const mapSearchClear = $('#map-search-clear');
+  const mapSearchCloseBtn = $('#map-search-close');
+  if (mapSearchOpenBtn) {
+    mapSearchOpenBtn.setAttribute('aria-expanded', 'false');
+    mapSearchOpenBtn.addEventListener('click', () => setMapSearchOpen(!mapSearchOpen));
+  }
+  if (mapSearchInput) {
+    mapSearchInput.addEventListener('input', () => {
+      mapSearchQuery = mapSearchInput.value;
+      renderMapSearchResults();
+    });
+    mapSearchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (mapSearchInput.value) {
+          mapSearchInput.value = '';
+          mapSearchQuery = '';
+          renderMapSearchResults();
+          mapSearchInput.focus();
+        } else {
+          closeMapSearch();
+        }
+        return;
+      }
+      if (event.key === 'Enter') {
+        const first = $('#map-search-results .search-result');
+        if (first) {
+          event.preventDefault();
+          handleMapSearchResult(first.dataset.resultId);
+        }
+      }
+    });
+  }
+  if (mapSearchClear && mapSearchInput) {
+    mapSearchClear.addEventListener('click', () => {
+      mapSearchInput.value = '';
+      mapSearchQuery = '';
+      renderMapSearchResults();
+      mapSearchInput.focus();
+    });
+  }
+  if (mapSearchCloseBtn) {
+    mapSearchCloseBtn.addEventListener('click', () => closeMapSearch());
+  }
+
+  const planBtn = $('#btn-plan');
+  if (planBtn) {
+    planBtn.setAttribute('aria-pressed', 'false');
+    planBtn.addEventListener('click', () => setPlanMode(!planMode));
+  }
+  const planClose = $('#plan-close');
+  if (planClose) planClose.addEventListener('click', () => setPlanMode(false));
+
+  const basemapToggle = $('#btn-basemap');
+  if (basemapToggle) {
+    basemapToggle.addEventListener('click', () => {
+      setBasemap(state.settings.basemap === 'light' ? 'local' : 'light');
+    });
+  }
 
   const editBtn = $('#btn-edit');
   if (editBtn) editBtn.addEventListener('click', () => setEditMode(!editMode));
@@ -3991,6 +4807,7 @@ async function loadSeeds() {
   }
 
   renderCounts();
+  renderPlan();
   setMapFilter(mapFilter);
   if (map) {
     fitMapToStores();

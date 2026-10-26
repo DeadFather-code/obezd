@@ -1,5 +1,5 @@
 /* Service worker: офлайн-оболочка приложения */
-const CACHE_NAME = 'obezd-db88623278';
+const CACHE_NAME = 'obezd-1b90c3f6a6';
 
 const LOD1 = [];
 for (let row = 0; row < 8; row += 1) {
@@ -88,13 +88,33 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (response && response.ok && response.type === 'basic') {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+      // Страницы подключают файлы с ?v=2.9 для сброса кеша. В офлайн-оболочке
+      // они лежат без параметра, поэтому сначала ищем тот же путь без query.
+      let normalized = null;
+      try {
+        const url = new URL(request.url);
+        if (url.search) {
+          url.search = '';
+          normalized = url.href;
         }
-        return response;
-      });
+      } catch (error) { /* ignore */ }
+      if (normalized) {
+        return caches.match(normalized).then((fallback) => {
+          if (fallback) return fallback;
+          return fetchAndCache(request);
+        });
+      }
+      return fetchAndCache(request);
     })
   );
 });
+
+function fetchAndCache(request) {
+  return fetch(request).then((response) => {
+    if (response && response.ok && response.type === 'basic') {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+    }
+    return response;
+  });
+}

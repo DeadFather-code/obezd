@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css?v=2.8">
+  <link rel="stylesheet" href="css/app.css?v=2.9">
 </head>
 <body>
 
@@ -44,6 +44,7 @@
   <symbol id="i-broadcast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 16.2a6 6 0 0 0 0-8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 19.1a10 10 0 0 0 0-14.2"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-warning" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></symbol>
 </svg>
 
 <div id="boot" class="boot">
@@ -68,12 +69,14 @@
             <span id="sync-status" class="sync-status"><i class="dot"></i><span id="sync-text">Загрузка…</span></span>
           </div>
         </div>
+        <button id="map-search-open" class="map-search-open" type="button" aria-label="Найти магазин по адресу">
+          <svg class="icon"><use href="#i-search"/></svg>
+          <span>Поиск адреса</span>
+        </button>
         <div class="map-actions">
-          <button id="btn-fit" class="icon-btn" type="button" title="Показать все точки" aria-label="Показать все точки">
-            <svg class="icon"><use href="#i-target"/></svg>
-          </button>
-          <button id="btn-edit" class="icon-btn" type="button" title="Режим редактирования" aria-label="Режим редактирования">
-            <svg class="icon"><use href="#i-pencil"/></svg>
+          <button id="btn-basemap" class="icon-btn basemap-toggle" type="button" title="Включить онлайн-карту" aria-label="Переключить карту онлайн или офлайн" aria-pressed="false">
+            <svg class="icon"><use href="#i-cloud"/></svg>
+            <span class="basemap-mode">офлайн</span>
           </button>
           <button id="btn-import" class="icon-btn" type="button" title="Загрузить магазины из OpenStreetMap" aria-label="Загрузить магазины из OpenStreetMap">
             <svg class="icon"><use href="#i-download"/></svg>
@@ -84,6 +87,19 @@
         <button class="chip active" type="button" data-filter="all">Все <b id="count-all">0</b></button>
         <button class="chip chip-due" type="button" data-filter="due">Пора <b id="count-due">0</b></button>
         <button class="chip chip-ok" type="button" data-filter="ok">В норме <b id="count-ok">0</b></button>
+      </div>
+
+      <div id="map-search-panel" class="map-search hidden">
+        <div class="search-field">
+          <svg class="icon"><use href="#i-search"/></svg>
+          <input id="map-search-input" type="search" placeholder="Улица, дом или название" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск магазина на карте по адресу">
+          <button id="map-search-clear" class="search-clear hidden" type="button" aria-label="Очистить поиск">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
+          <button id="map-search-close" class="search-cancel" type="button">Отмена</button>
+        </div>
+        <div id="map-search-hint" class="search-hint hidden"></div>
+        <div id="map-search-results" class="search-results"></div>
       </div>
     </div>
 
@@ -99,17 +115,49 @@
       <button id="add-cancel" class="mini-btn" type="button">Отмена</button>
     </div>
 
-    <button id="fab-add" class="fab" type="button" title="Добавить точку" aria-label="Добавить точку">
-      <svg class="icon"><use href="#i-plus"/></svg>
-    </button>
+    <div class="map-fab-row">
+      <button id="btn-edit" class="icon-btn map-edit-btn" type="button" title="Перенос точек" aria-label="Режим переноса точек">
+        <svg class="icon"><use href="#i-pencil"/></svg>
+      </button>
+      <button id="fab-add" class="fab" type="button" title="Добавить точку" aria-label="Добавить точку">
+        <svg class="icon"><use href="#i-plus"/></svg>
+      </button>
+    </div>
 
     <div class="map-tools">
+      <button id="btn-plan" class="map-tool plan-tool" type="button" title="Планирование маршрута" aria-label="Планирование маршрута">
+        <svg class="icon"><use href="#i-route"/></svg>
+        <span id="plan-count" class="map-tool-count hidden">0</span>
+      </button>
       <button id="btn-locate" class="map-tool" type="button" title="Где я" aria-label="Показать моё местоположение">
         <svg class="icon"><use href="#i-locate"/></svg>
       </button>
       <button id="btn-share" class="map-tool" type="button" title="Делиться геопозицией" aria-label="Делиться геопозицией" aria-pressed="false">
         <svg class="icon"><use href="#i-broadcast"/></svg>
       </button>
+    </div>
+
+    <div id="plan-panel" class="plan-panel hidden" aria-label="План маршрута">
+      <div class="plan-head">
+        <div class="plan-head-text">
+          <b>План маршрута</b>
+          <span id="plan-summary">Точки не выбраны</span>
+        </div>
+        <button id="plan-close" class="icon-btn plan-close" type="button" aria-label="Закрыть планировщик">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div id="plan-list" class="plan-list"></div>
+      <div class="plan-tools">
+        <button id="plan-add-due" class="plan-tool-btn" type="button" data-action="plan-add-due">Добавить «пора»</button>
+        <button id="plan-optimize" class="plan-tool-btn plan-tool-main" type="button" data-action="plan-optimize">Упорядочить</button>
+        <button id="plan-clear" class="plan-tool-btn plan-danger" type="button" data-action="plan-clear">Очистить</button>
+      </div>
+      <div class="plan-foot">
+        <span id="plan-distance" class="plan-distance">Нажмите на маркер или найдите точку</span>
+        <a id="plan-yandex" class="plan-yandex hidden" href="#" target="_blank" rel="noopener">В Яндекс.Картах</a>
+      </div>
+      <div class="plan-note">Линия на карте показывает порядок по прямой. Маршрут по дорогам построят Яндекс.Карты.</div>
     </div>
 
     <div id="people-bar" class="people-bar hidden" aria-label="Участники на карте"></div>
@@ -141,10 +189,6 @@
       </div>
     </header>
     <div id="routes-list" class="routes-list"></div>
-    <div class="screen-note">
-      <svg class="icon"><use href="#i-clock"/></svg>
-      <span>Для каждой точки действует свой срок. По умолчанию — 45 дней, его можно изменить в настройках или у отдельного магазина.</span>
-    </div>
   </section>
 
   <!-- ================= МАРШРУТ: ДЕТАЛИ ================= -->
@@ -162,6 +206,16 @@
       </button>
     </header>
     <div id="route-overview" class="route-overview"></div>
+    <div id="oryol-search" class="route-search hidden">
+      <div class="search-field">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input id="oryol-search-input" type="search" placeholder="Найти адрес или магазин в «Орле»" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск магазина по адресу в маршруте Орёл">
+        <button id="oryol-search-clear" class="search-clear hidden" type="button" aria-label="Очистить поиск">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div id="oryol-search-hint" class="search-hint hidden"></div>
+    </div>
     <div id="route-store-list" class="route-store-list"></div>
   </section>
 
@@ -298,7 +352,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.8</span></p>
+            <p>Версия <span id="app-version">2.9</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -466,6 +520,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js?v=2.8" defer></script>
+<script src="js/app.js?v=2.9" defer></script>
 </body>
 </html>
