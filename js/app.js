@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.9';
+const APP_VERSION = '2.9.1';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -1532,7 +1532,7 @@ function renderPlan() {
   if (!listEl) return;
 
   if (!stores.length) {
-    listEl.innerHTML = '<div class="plan-empty">Отметьте точки на карте или найдите адрес. Можно сразу добавить все магазины из группы «Пора».</div>';
+    listEl.innerHTML = '<div class="plan-empty">Отметьте точки на карте или найдите адрес.</div>';
   } else {
     listEl.innerHTML = stores.map((store, index) => {
       const address = store.address ? escapeHtml(store.address) : 'Адрес не указан';
@@ -1579,11 +1579,6 @@ function renderPlan() {
   if (optimize) optimize.disabled = stores.length < 3;
   const clear = $('#plan-clear');
   if (clear) clear.disabled = stores.length === 0;
-  const addDue = $('#plan-add-due');
-  if (addDue) {
-    const ids = new Set(stores.map(store => store.id));
-    addDue.disabled = !mapStores().some(store => getStatus(store).due && !ids.has(store.id));
-  }
 }
 
 function refreshPlanMarkers() {
@@ -1651,25 +1646,6 @@ function movePlanStore(id, delta) {
   savePrefs();
   renderPlan();
   refreshPlanMarkers();
-}
-
-function addDueToPlan() {
-  const existing = new Set(planIds());
-  const due = mapStores()
-    .filter(store => getStatus(store).due && !existing.has(store.id))
-    .sort((a, b) => a.name.localeCompare(b.name, 'ru') ||
-      (a.address || '').localeCompare(b.address || '', 'ru'));
-  if (!due.length) {
-    showSnackbar('Все магазины «пора» уже в плане');
-    return;
-  }
-  const free = Math.max(0, 300 - planIds().length);
-  const added = due.slice(0, free);
-  uiPrefs.plan = planIds().concat(added.map(store => store.id));
-  savePrefs();
-  renderPlan();
-  refreshPlanMarkers();
-  showSnackbar('Добавлено в план: ' + added.length);
 }
 
 function optimizePlanOrder() {
@@ -4378,9 +4354,6 @@ function handleAction(action, el) {
     }
     case 'show-map':
       go('map');
-      break;
-    case 'plan-add-due':
-      addDueToPlan();
       break;
     case 'plan-optimize':
       optimizePlanOrder();

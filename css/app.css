@@ -1164,7 +1164,7 @@ b, strong {
 
 .plan-tools {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto;
   gap: 6px;
 }
 
