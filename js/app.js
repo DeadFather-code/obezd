@@ -3487,7 +3487,6 @@ function renderRoutesList() {
   if (!list) return;
 
   let html = '';
-  let totalDue = 0;
 
   for (const city of cityList()) {
     if (!city) continue;
@@ -3499,19 +3498,11 @@ function renderRoutesList() {
   for (const name of ROUTE_NAMES) {
     if (name === ORYOL_ROUTE) continue;
     const summary = routeVisitedSummary(name);
-    totalDue += summary.counts.due;
     html += routeCardHtml(name, summary.stores, summary.counts);
   }
 
   list.innerHTML = html;
 
-  const sub = $('#routes-sub');
-  if (sub) {
-    const cities = cityList().map(city => city.name).filter(Boolean).join(', ');
-    sub.textContent = totalDue
-      ? totalDue + ' ' + plural(totalDue, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита в дальних маршрутах. ' + cities + ' - все магазины на карте.'
-      : cities + ' - все магазины на карте, дальние маршруты в норме.';
-  }
   updateCityUi();
 }
 
