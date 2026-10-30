@@ -1,0 +1,41 @@
+{
+  "default": "orel",
+  "cities": [
+    {
+      "id": "orel",
+      "name": "Орёл",
+      "region": "Орловская область",
+      "center": [52.965, 36.075],
+      "zoom": 12,
+      "bounds": [[52.855, 35.9], [53.055, 36.215]],
+      "mapDir": "map",
+      "baseFile": "oryol-base.webp",
+      "stores": "js/stores.json",
+      "routes": ["Ливны1", "Ливны2", "Залегощь", "Карачев", "Мценск", "Кромы", "Болхов"]
+    },
+    {
+      "id": "bryansk",
+      "name": "Брянск",
+      "region": "Брянская область",
+      "center": [53.252, 34.366],
+      "zoom": 12,
+      "bounds": [[53.15, 34.2], [53.36, 34.55]],
+      "mapDir": "map/bryansk",
+      "baseFile": "base.webp",
+      "stores": "js/stores-bryansk.json",
+      "routes": []
+    },
+    {
+      "id": "zheleznogorsk",
+      "name": "Железногорск",
+      "region": "Курская область",
+      "center": [52.339, 35.352],
+      "zoom": 12,
+      "bounds": [[52.25, 35.23], [52.43, 35.48]],
+      "mapDir": "map/zheleznogorsk",
+      "baseFile": "base.webp",
+      "stores": "js/stores-zheleznogorsk.json",
+      "routes": ["Железногорск"]
+    }
+  ]
+}

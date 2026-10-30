@@ -1,12 +1,13 @@
 'use strict';
 
 /* ============================================================
-   Объезд магазинов — мобильное приложение (PWA)
+   Объезд магазинов - мобильное приложение (PWA)
    Локальные данные + синхронизация группы через Firestore
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.9.3';
+const APP_VERSION = '2.10.0';
+const DEFAULT_CITY = 'orel';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
 const DEFAULT_PERIOD = 45;
@@ -84,12 +85,21 @@ let uiPrefs = {
   profile: { id: '', name: '' },
   shareLocation: false,
   shareAsked: false,
+  city: DEFAULT_CITY,
+  plans: {},
+  tours: {},
+  views: {},
   plan: [],
   tour: null
 };
 
+let citiesConfig = { default: DEFAULT_CITY, cities: [] };
+let currentCity = null;
+let cityStoreCounts = {};
+let cityStoreSeeds = {};
 let mapStoresSeed = [];
 let routeSeed = {};
+let routeSeedLoaded = false;
 let storeCache = new Map();
 let knownStoreIds = new Set();
 let allStores = [];
@@ -107,6 +117,8 @@ const localSegments = new Map();
 let mapLabelLayer = null;
 let mapLabelMarkers = [];
 let mapAssetsRequested = false;
+let mapAssetsToken = 0;
+let viewSaveTimer = null;
 let tileErrorCount = 0;
 let tileErrorTimer = null;
 const LOCAL_MAP_BOUNDS = [[52.855, 35.900], [53.055, 36.215]];
@@ -214,9 +226,9 @@ function daysWord(n) {
 }
 
 function formatDate(ts) {
-  if (!ts) return '—';
+  if (!ts) return '-';
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '-';
   const opts = { day: 'numeric', month: 'long' };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
   try {
@@ -227,9 +239,9 @@ function formatDate(ts) {
 }
 
 function formatDateTime(ts) {
-  if (!ts) return '—';
+  if (!ts) return '-';
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '-';
   try {
     return new Intl.DateTimeFormat('ru-RU', {
       day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
@@ -274,6 +286,188 @@ function storeDisplayName(brand, name) {
 
 function makeId(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+}
+
+/* --------------------------- Города --------------------------- */
+
+function fallbackCity() {
+  return {
+    id: DEFAULT_CITY,
+    name: 'Орёл',
+    region: 'Орловская область',
+    center: [52.965, 36.075],
+    zoom: 12,
+    bounds: LOCAL_MAP_BOUNDS,
+    mapDir: 'map',
+    baseFile: 'oryol-base.webp',
+    stores: 'js/stores.json',
+    routes: ROUTE_NAMES.slice()
+  };
+}
+
+function cityList() {
+  const list = citiesConfig && Array.isArray(citiesConfig.cities) ? citiesConfig.cities : [];
+  return list.length ? list : [fallbackCity()];
+}
+
+function cityById(id) {
+  const list = cityList();
+  return list.find(city => city && city.id === id) || list[0];
+}
+
+function currentCityId() {
+  return currentCity ? currentCity.id : (uiPrefs.city || DEFAULT_CITY);
+}
+
+function currentCityName() {
+  return currentCity ? currentCity.name : 'Орёл';
+}
+
+function cityBoundsOf(city) {
+  const bounds = city && city.bounds;
+  if (Array.isArray(bounds) && bounds.length === 2) {
+    const south = toNumber(bounds[0] && bounds[0][0]);
+    const west = toNumber(bounds[0] && bounds[0][1]);
+    const north = toNumber(bounds[1] && bounds[1][0]);
+    const east = toNumber(bounds[1] && bounds[1][1]);
+    if (isValidCoord(south, west) && isValidCoord(north, east)) {
+      return [[south, west], [north, east]];
+    }
+  }
+  return LOCAL_MAP_BOUNDS;
+}
+
+function cityCenterOf(city) {
+  const center = city && city.center;
+  if (Array.isArray(center) && center.length === 2) {
+    const lat = toNumber(center[0]);
+    const lon = toNumber(center[1]);
+    if (isValidCoord(lat, lon)) return [lat, lon];
+  }
+  const bounds = cityBoundsOf(city);
+  return [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2];
+}
+
+function isValidCityId(id) {
+  return cityList().some(city => city && city.id === id);
+}
+
+function cityIdForCoords(lat, lon) {
+  const y = toNumber(lat);
+  const x = toNumber(lon);
+  if (isValidCoord(y, x)) {
+    for (const city of cityList()) {
+      const bounds = cityBoundsOf(city);
+      if (y >= bounds[0][0] && y <= bounds[1][0] && x >= bounds[0][1] && x <= bounds[1][1]) {
+        return city.id;
+      }
+    }
+  }
+  return DEFAULT_CITY;
+}
+
+function isMainRouteName(name) {
+  if (name === ORYOL_ROUTE) return true;
+  return cityList().some(city => city && city.name === name);
+}
+
+function cityByRouteName(name) {
+  if (!name) return null;
+  return cityList().find(city => city && (
+    city.name === name || (city.id === DEFAULT_CITY && name === ORYOL_ROUTE)
+  )) || null;
+}
+
+function normalizePlanPrefs(raw) {
+  const plans = {};
+  if (raw && typeof raw === 'object') {
+    for (const [cityId, list] of Object.entries(raw)) {
+      if (!isValidCityId(cityId) || !Array.isArray(list)) continue;
+      plans[cityId] = list.filter(id => typeof id === 'string' && id).slice(0, 300);
+    }
+  }
+  return plans;
+}
+
+function normalizeTourPrefs(raw) {
+  const tours = {};
+  if (raw && typeof raw === 'object') {
+    for (const [cityId, value] of Object.entries(raw)) {
+      if (!isValidCityId(cityId) || !value || typeof value !== 'object') continue;
+      const ids = Array.isArray(value.ids)
+        ? value.ids.filter(id => typeof id === 'string' && id).slice(0, 300)
+        : [];
+      if (ids.length) tours[cityId] = { ids, startedAt: toNumber(value.startedAt) || Date.now() };
+    }
+  }
+  return tours;
+}
+
+function normalizeViewPrefs(raw) {
+  const views = {};
+  if (raw && typeof raw === 'object') {
+    for (const [cityId, value] of Object.entries(raw)) {
+      if (!isValidCityId(cityId) || !value || typeof value !== 'object') continue;
+      const lat = toNumber(value.lat);
+      const lon = toNumber(value.lng != null ? value.lng : value.lon);
+      const zoom = toNumber(value.zoom);
+      if (isValidCoord(lat, lon) && zoom != null) {
+        views[cityId] = { lat, lng: lon, zoom: Math.round(zoom) };
+      }
+    }
+  }
+  return views;
+}
+
+async function loadCities() {
+  try {
+    const response = await fetch('js/cities.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error('cities.json: HTTP ' + response.status);
+    const raw = await response.json();
+    const list = Array.isArray(raw && raw.cities) ? raw.cities : [];
+    const cities = list
+      .filter(city => city && typeof city.id === 'string' && city.id && city.name)
+      .map(city => ({
+        id: city.id,
+        name: String(city.name),
+        region: String(city.region || ''),
+        center: Array.isArray(city.center) ? city.center : [52.965, 36.075],
+        zoom: toNumber(city.zoom) || 12,
+        bounds: city.bounds,
+        mapDir: String(city.mapDir || 'map').replace(/\\/g, '/').replace(/\/+$/, ''),
+        baseFile: String(city.baseFile || 'oryol-base.webp'),
+        stores: String(city.stores || 'js/stores.json'),
+        routes: Array.isArray(city.routes) ? city.routes.slice() : []
+      }));
+    if (cities.length) {
+      citiesConfig = {
+        default: cities.some(city => city.id === raw.default) ? raw.default : cities[0].id,
+        cities
+      };
+    }
+  } catch (error) {
+    console.warn('Не удалось загрузить список городов', error);
+  }
+  if (!citiesConfig.cities.length) {
+    citiesConfig = { default: DEFAULT_CITY, cities: [fallbackCity()] };
+  }
+  currentCity = cityById(uiPrefs.city || citiesConfig.default);
+}
+
+async function loadCityStoreCounts() {
+  const counts = {};
+  await Promise.all(cityList().map(async (city) => {
+    try {
+      const response = await fetch(city.stores || 'js/stores.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const raw = await response.json();
+      counts[city.id] = Array.isArray(raw) ? raw.length : 0;
+    } catch (error) {
+      counts[city.id] = null;
+    }
+  }));
+  cityStoreCounts = counts;
+  renderCitySheet();
 }
 
 /* --------------------------- Профиль --------------------------- */
@@ -509,6 +703,7 @@ function sanitizeCustom(raw) {
       lat: lat != null && lat > -90 && lat < 90 ? lat : null,
       lon: lon != null && lon > -180 && lon < 180 ? lon : null,
       route: ROUTE_NAMES.includes(value.route) ? value.route : null,
+      city: isValidCityId(value.city) ? value.city : cityIdForCoords(lat, lon),
       osm: typeof value.osm === 'string' ? value.osm : '',
       source: typeof value.source === 'string' ? value.source : 'user',
       upd: toNumber(value.upd) || Date.now()
@@ -573,16 +768,33 @@ function loadLocal() {
       };
       uiPrefs.shareLocation = prefs.shareLocation === true;
       uiPrefs.shareAsked = prefs.shareAsked === true;
-      uiPrefs.plan = Array.isArray(prefs.plan)
-        ? prefs.plan.filter(id => typeof id === 'string' && id).slice(0, 300)
-        : [];
-      const savedTour = prefs.tour && typeof prefs.tour === 'object' ? prefs.tour : null;
-      const tourIds = savedTour && Array.isArray(savedTour.ids)
-        ? savedTour.ids.filter(id => typeof id === 'string' && id).slice(0, 300)
-        : [];
-      uiPrefs.tour = tourIds.length
-        ? { ids: tourIds, startedAt: toNumber(savedTour.startedAt) || Date.now() }
-        : null;
+      uiPrefs.city = typeof prefs.city === 'string' && prefs.city ? prefs.city : DEFAULT_CITY;
+
+      const hasCityPrefs = prefs.plans && typeof prefs.plans === 'object';
+      uiPrefs.plans = normalizePlanPrefs(prefs.plans);
+      uiPrefs.tours = normalizeTourPrefs(prefs.tours);
+      uiPrefs.views = normalizeViewPrefs(prefs.views);
+
+      if (!hasCityPrefs) {
+        /* Старая версия хранила один план и один объезд - это был Орёл. */
+        const legacyPlan = Array.isArray(prefs.plan)
+          ? prefs.plan.filter(id => typeof id === 'string' && id).slice(0, 300)
+          : [];
+        if (legacyPlan.length) uiPrefs.plans[DEFAULT_CITY] = legacyPlan;
+        const savedTour = prefs.tour && typeof prefs.tour === 'object' ? prefs.tour : null;
+        const tourIds = savedTour && Array.isArray(savedTour.ids)
+          ? savedTour.ids.filter(id => typeof id === 'string' && id).slice(0, 300)
+          : [];
+        if (tourIds.length) {
+          uiPrefs.tours[DEFAULT_CITY] = {
+            ids: tourIds,
+            startedAt: toNumber(savedTour.startedAt) || Date.now()
+          };
+        }
+      }
+      currentCity = cityById(uiPrefs.city);
+      uiPrefs.plan = planIds().slice();
+      uiPrefs.tour = tourPref();
     }
   } catch (e) { /* ignore */ }
   if (!uiPrefs.profile.id) uiPrefs.profile.id = makeId('user');
@@ -618,7 +830,7 @@ function savePrefs() {
 
 /* ------------------------- Справочник точек ------------------------- */
 
-function normalizeSeedMapStore(seed) {
+function normalizeSeedMapStore(seed, cityId) {
   const lat = toNumber(seed.lat);
   const lon = toNumber(seed.lon);
   if (!isValidCoord(lat, lon)) return null;
@@ -631,13 +843,14 @@ function normalizeSeedMapStore(seed) {
     lat,
     lon,
     route: null,
+    city: isValidCityId(cityId) ? cityId : DEFAULT_CITY,
     osm: String(seed.osm || ''),
     source: 'seed'
   };
 }
 
 function normalizeRouteSeedStore(seed, route) {
-  const base = normalizeSeedMapStore(seed);
+  const base = normalizeSeedMapStore(seed, DEFAULT_CITY);
   if (!base) return null;
   base.route = route;
   base.address = String(seed.address != null ? seed.address : (seed.addr || '')).trim();
@@ -656,6 +869,7 @@ function composeStore(base) {
   const lat = ov.lat != null ? ov.lat : toNumber(src.lat);
   const lon = ov.lon != null ? ov.lon : toNumber(src.lon);
   const route = src.route && ROUTE_NAMES.includes(src.route) ? src.route : null;
+  const city = isValidCityId(src.city) ? src.city : cityIdForCoords(lat, lon);
   const rawPeriod = ov.period !== undefined ? ov.period : src.period;
   const period = rawPeriod != null && Number(rawPeriod) > 0 ? clampPeriod(rawPeriod) : null;
   return {
@@ -667,6 +881,7 @@ function composeStore(base) {
     lat: isValidCoord(lat, lon) ? lat : null,
     lon: isValidCoord(lat, lon) ? lon : null,
     route,
+    city,
     period,
     osm: String(src.osm || ''),
     source: src.source || (custom ? 'user' : 'seed'),
@@ -678,8 +893,11 @@ function composeStore(base) {
 function rebuildStoreCache() {
   const bases = new Map();
 
-  for (const seed of mapStoresSeed) {
-    if (seed && seed.id) bases.set(seed.id, seed);
+  for (const seeds of Object.values(cityStoreSeeds)) {
+    if (!Array.isArray(seeds)) continue;
+    for (const seed of seeds) {
+      if (seed && seed.id) bases.set(seed.id, seed);
+    }
   }
   for (const route of ROUTE_NAMES) {
     const list = Array.isArray(routeSeed[route]) ? routeSeed[route] : [];
@@ -698,6 +916,7 @@ function rebuildStoreCache() {
       lat: rec.lat,
       lon: rec.lon,
       route: rec.route,
+      city: rec.city,
       period: rec.period,
       osm: rec.osm,
       source: rec.source || 'user'
@@ -804,20 +1023,28 @@ function flushAliasSave() {
 }
 
 function isKnownRoute(name) {
-  return name === ORYOL_ROUTE || ROUTE_NAMES.includes(name);
+  return isMainRouteName(name) || ROUTE_NAMES.includes(name);
 }
 
 function storesForRoute(route) {
-  if (route === ORYOL_ROUTE) return mapStores();
-  return allStores.filter(s => s.route === route);
+  const mainCity = cityByRouteName(route);
+  if (mainCity) {
+    return allStores.filter(s => s.city === mainCity.id && !s.route && s.lat != null && s.lon != null);
+  }
+  return allStores.filter(s => s.route === route && s.city === DEFAULT_CITY);
+}
+
+function cityStores() {
+  const cityId = currentCityId();
+  return allStores.filter(s => s.city === cityId);
 }
 
 function mapStores() {
-  return allStores.filter(s => !s.route && s.lat != null && s.lon != null);
+  return cityStores().filter(s => !s.route && s.lat != null && s.lon != null);
 }
 
 function routeStores() {
-  return allStores.filter(s => s.route);
+  return cityStores().filter(s => s.route);
 }
 
 /* --------------------------- Таймер --------------------------- */
@@ -963,6 +1190,17 @@ function clusterGroupForMarker(marker) {
   return clusterGroupFor(!!(marker && marker.options && marker.options.storeDue));
 }
 
+/* Кластерные группы держат на карте ещё и внутренние слои
+   (_featureGroup/_nonPointGroup) — их нельзя снимать при очистке карты. */
+function isClusterInternalLayer(layer) {
+  if (!clusterLayers) return false;
+  for (const group of [clusterLayers.ok, clusterLayers.due]) {
+    if (!group) continue;
+    if (layer === group || layer === group._featureGroup || layer === group._nonPointGroup) return true;
+  }
+  return false;
+}
+
 function refreshClusterLayers() {
   if (!clusterLayers) return;
   for (const layer of [clusterLayers.due, clusterLayers.ok]) {
@@ -973,12 +1211,13 @@ function refreshClusterLayers() {
 function initMap() {
   if (map || typeof L === 'undefined') return;
 
+  const city = currentCity || cityById(currentCityId());
   map = L.map('map', {
     zoomControl: false,
     attributionControl: false,
     minZoom: 3,
     maxZoom: 18
-  }).setView([52.965, 36.075], 12);
+  }).setView(cityCenterOf(city), city.zoom || 12, { animate: false });
 
   /* Подпись об источнике карты есть в настройках, на карте не мешаем. */
 
@@ -1012,6 +1251,7 @@ function initMap() {
   map.on('moveend', () => {
     syncLocalSegments();
     layoutMapLabels();
+    scheduleSaveView();
   });
 
   loadMapAssets();
@@ -1028,43 +1268,58 @@ function handleTileError() {
   if (tileErrorCount >= 6) {
     tileErrorCount = 0;
     setBasemap('local', true);
-    showSnackbar('Карта не загрузилась — включена локальная схема');
+    showSnackbar('Карта не загрузилась - включена локальная схема');
   }
 }
 
 async function loadMapAssets() {
   if (mapAssetsRequested || typeof L === 'undefined') return;
   mapAssetsRequested = true;
+  const token = ++mapAssetsToken;
+  const city = currentCity || cityById(currentCityId());
 
   try {
-    const response = await fetch('map/layers.json', { cache: 'no-store' });
+    const mapDir = (city.mapDir || 'map').replace(/\\/g, '/');
+    const layersUrl = mapDir + '/layers.json';
+    const response = await fetch(layersUrl, { cache: 'no-store' });
     if (!response.ok) throw new Error('layers.json: HTTP ' + response.status);
     const config = await response.json();
+    if (token !== mapAssetsToken) return;
     if (!config || !Array.isArray(config.levels) || !config.levels.length) {
       throw new Error('layers.json: bad format');
     }
     const bounds = Array.isArray(config.bounds) && config.bounds.length === 2
       ? config.bounds
-      : LOCAL_MAP_BOUNDS;
+      : cityBoundsOf(city);
     config.bounds = bounds;
     localLayers = config;
   } catch (error) {
     console.warn('Не удалось загрузить слои карты', error);
+    if (token !== mapAssetsToken) return;
+    const bounds = cityBoundsOf(city);
     localLayers = {
-      bounds: LOCAL_MAP_BOUNDS,
-      levels: [{ name: 'base', dir: 'map', grid: 1, width: 2372, height: 2500, maxZoom: 18 }]
+      bounds: bounds,
+      levels: [{ name: 'base', dir: city.mapDir || 'map', grid: 1, width: 2372, height: 2500, maxZoom: 18 }],
+      base: city.baseFile || 'oryol-base.webp'
     };
   }
 
+  if (token !== mapAssetsToken) return;
   const baseLevel = localLayers.levels[0];
+  const mapDir = (city.mapDir || 'map').replace(/\\/g, '/');
+  const baseFile = localLayers.base || city.baseFile || (city.id === DEFAULT_CITY ? 'oryol-base.webp' : 'base.webp');
+  if (localBaseLayer && map) {
+    try { map.removeLayer(localBaseLayer); } catch (e) {}
+  }
   localBaseLayer = L.imageOverlay(
-    baseLevel.dir + '/oryol-base.webp',
+    (baseLevel.dir || mapDir) + '/' + baseFile,
     [[localLayers.bounds[0][0], localLayers.bounds[0][1]],
      [localLayers.bounds[1][0], localLayers.bounds[1][1]]],
     { interactive: false, className: 'basemap-image' }
   );
 
   await loadMapLabels();
+  if (token !== mapAssetsToken) return;
   updateLocalBasemap();
 }
 
@@ -1118,6 +1373,7 @@ function syncLocalSegments() {
   const level = localLayers.levels[levelIndex];
   if (!level || level.grid <= 1) return;
 
+  const mapDir = ((currentCity && currentCity.mapDir) || level.dir || 'map').replace(/\\/g, '/');
   const view = map.getBounds().pad(0.12);
   const keep = new Set();
 
@@ -1130,8 +1386,9 @@ function syncLocalSegments() {
       keep.add(key);
       let overlay = localSegments.get(key);
       if (!overlay) {
+        const dir = (level.dir || (level.name === 'base' ? mapDir : mapDir + '/' + level.name)).replace(/\\/g, '/');
         overlay = L.imageOverlay(
-          level.dir + '/' + row + '_' + col + '.webp',
+          dir + '/' + row + '_' + col + '.webp',
           bounds,
           { interactive: false, className: 'basemap-image' }
         );
@@ -1152,7 +1409,9 @@ async function loadMapLabels() {
   if (mapLabelLayer || typeof L === 'undefined') return;
 
   try {
-    const response = await fetch('map/labels.json', { cache: 'no-store' });
+    const city = currentCity || cityById(currentCityId());
+    const labelsUrl = (city.mapDir || 'map').replace(/\\/g, '/') + '/labels.json';
+    const response = await fetch(labelsUrl, { cache: 'no-store' });
     if (!response.ok) throw new Error('labels.json: HTTP ' + response.status);
     const raw = await response.json();
     if (!Array.isArray(raw)) throw new Error('labels.json: bad format');
@@ -1359,7 +1618,7 @@ function renderMapMarkers() {
         icon: markerIcon(store, orders.get(store.id)),
         draggable: false,
         keyboard: false,
-        title: store.name + (store.address ? ' — ' + store.address : ''),
+        title: store.name + (store.address ? ' - ' + store.address : ''),
         storeDue: status.due,
         storeId: store.id
       });
@@ -1400,7 +1659,7 @@ function renderMapMarkers() {
       icon: markerIcon(store),
       draggable: editMode,
       keyboard: false,
-      title: store.name + (store.address ? ' — ' + store.address : ''),
+      title: store.name + (store.address ? ' - ' + store.address : ''),
       storeDue: status.due,
       storeId: store.id
     });
@@ -1519,7 +1778,19 @@ function updateMapEmpty() {
 /* --------------------------- План маршрута --------------------------- */
 
 function planIds() {
-  return Array.isArray(uiPrefs.plan) ? uiPrefs.plan : [];
+  const plans = uiPrefs.plans && typeof uiPrefs.plans === 'object' ? uiPrefs.plans : {};
+  const list = plans[currentCityId()];
+  return Array.isArray(list) ? list : [];
+}
+
+function setPlanIds(ids) {
+  const list = (Array.isArray(ids) ? ids : [])
+    .filter(id => typeof id === 'string' && id)
+    .slice(0, 300);
+  if (!uiPrefs.plans || typeof uiPrefs.plans !== 'object') uiPrefs.plans = {};
+  uiPrefs.plans[currentCityId()] = list;
+  uiPrefs.plan = list.slice();
+  savePrefs();
 }
 
 function planStoreList() {
@@ -1540,8 +1811,7 @@ function syncPlanIds() {
   const next = stores.map(store => store.id);
   const current = planIds();
   if (next.length !== current.length || next.some((id, index) => id !== current[index])) {
-    uiPrefs.plan = next;
-    savePrefs();
+    setPlanIds(next);
   }
   return stores;
 }
@@ -1697,7 +1967,7 @@ function addPlanStore(id, options) {
     return false;
   }
   uiPrefs.plan = planIds().concat(store.id);
-  savePrefs();
+  setPlanIds(uiPrefs.plan);
   renderPlan();
   refreshPlanMarkers();
   if (!options || options.quiet !== true) showSnackbar('В плане: ' + store.name);
@@ -1708,8 +1978,7 @@ function removePlanStore(id) {
   const previous = planIds();
   const next = previous.filter(item => item !== id);
   if (next.length === previous.length) return;
-  uiPrefs.plan = next;
-  savePrefs();
+  setPlanIds(next);
   renderPlan();
   refreshPlanMarkers();
 }
@@ -1727,8 +1996,7 @@ function movePlanStore(id, delta) {
   if (target < 0 || target >= list.length) return;
   list.splice(index, 1);
   list.splice(target, 0, id);
-  uiPrefs.plan = list;
-  savePrefs();
+  setPlanIds(list);
   renderPlan();
   refreshPlanMarkers();
 }
@@ -1776,7 +2044,7 @@ function optimizePlanOrder() {
   }
 
   uiPrefs.plan = ordered.map(store => store.id);
-  savePrefs();
+  setPlanIds(uiPrefs.plan);
   renderPlan();
   refreshPlanMarkers();
   showSnackbar('Порядок обновлён · ' + formatDistanceKm(planDistanceMeters()) + ' по прямой');
@@ -1785,50 +2053,88 @@ function optimizePlanOrder() {
 function clearPlan() {
   const previous = planIds().slice();
   if (!previous.length) return;
-  uiPrefs.plan = [];
-  savePrefs();
+  setPlanIds([]);
   renderPlan();
-  refreshPlanMarkers();
   showSnackbar('План очищен', 'Вернуть', () => {
-    uiPrefs.plan = previous;
-    savePrefs();
+    setPlanIds(previous);
     renderPlan();
-    refreshPlanMarkers();
   });
 }
 
 /* --------------------------- Объезд по плану --------------------------- */
 
+function tourPref() {
+  const tours = uiPrefs.tours && typeof uiPrefs.tours === 'object' ? uiPrefs.tours : {};
+  const cityId = currentCityId();
+  const value = tours[cityId];
+  if (!value || !Array.isArray(value.ids) || !value.ids.length) return null;
+  return { ids: value.ids.slice(), startedAt: toNumber(value.startedAt) || Date.now() };
+}
+
+function setTourPref(tour) {
+  if (!uiPrefs.tours || typeof uiPrefs.tours !== 'object') uiPrefs.tours = {};
+  const cityId = currentCityId();
+  if (!tour || !Array.isArray(tour.ids) || !tour.ids.length) {
+    delete uiPrefs.tours[cityId];
+    uiPrefs.tour = null;
+  } else {
+    uiPrefs.tours[cityId] = { ids: tour.ids.slice(), startedAt: toNumber(tour.startedAt) || Date.now() };
+    uiPrefs.tour = uiPrefs.tours[cityId];
+  }
+  savePrefs();
+}
+
 function tourIds() {
-  return uiPrefs.tour && Array.isArray(uiPrefs.tour.ids) ? uiPrefs.tour.ids : [];
+  const tour = tourPref();
+  return tour && Array.isArray(tour.ids) ? tour.ids : [];
 }
 
 function syncTourState() {
-  if (!uiPrefs.tour) return false;
+  const tour = tourPref();
+  uiPrefs.tour = tour;
+  if (!tour) return false;
   const ids = [];
   const seen = new Set();
-  for (const id of tourIds()) {
+  const cityId = currentCityId();
+  for (const id of tour.ids) {
     if (seen.has(id)) continue;
     const store = getStore(id);
     if (!store || !isValidCoord(store.lat, store.lon)) continue;
+    if (store.city && store.city !== cityId) continue;
     seen.add(id);
     ids.push(id);
   }
-  const current = tourIds();
   if (!ids.length) {
-    uiPrefs.tour = null;
-    savePrefs();
+    setTourPref(null);
     return true;
   }
-  if (ids.length !== current.length ||
-      ids.some((id, index) => id !== current[index]) ||
-      typeof uiPrefs.tour.startedAt !== 'number') {
-    uiPrefs.tour = { ids, startedAt: toNumber(uiPrefs.tour.startedAt) || Date.now() };
-    savePrefs();
+  if (ids.length !== tour.ids.length ||
+      ids.some((id, index) => id !== tour.ids[index]) ||
+      typeof tour.startedAt !== 'number') {
+    setTourPref({ ids, startedAt: toNumber(tour.startedAt) || Date.now() });
     return true;
   }
   return false;
 }
+
+function saveCurrentView() {
+  if (!map) return;
+  const center = map.getCenter();
+  if (!isValidCoord(center.lat, center.lng)) return;
+  if (!uiPrefs.views || typeof uiPrefs.views !== 'object') uiPrefs.views = {};
+  uiPrefs.views[currentCityId()] = {
+    lat: Number(center.lat.toFixed(6)),
+    lng: Number(center.lng.toFixed(6)),
+    zoom: Math.round(map.getZoom())
+  };
+  savePrefs();
+}
+
+function scheduleSaveView() {
+  if (viewSaveTimer) clearTimeout(viewSaveTimer);
+  viewSaveTimer = setTimeout(saveCurrentView, 250);
+}
+
 
 function isTourPending(id) {
   return !!id && tourVisual.pending.has(id);
@@ -1921,8 +2227,7 @@ function startTour() {
     return;
   }
 
-  uiPrefs.tour = { ids: stores.map(store => store.id), startedAt: Date.now() };
-  savePrefs();
+  setTourPref({ ids: stores.map(store => store.id), startedAt: Date.now() });
   if (planMode) setPlanMode(false);
   else if (map) renderMapMarkers();
 
@@ -1938,13 +2243,11 @@ function startTour() {
 function resetTour() {
   if (!uiPrefs.tour) return;
   const previous = uiPrefs.tour;
-  uiPrefs.tour = null;
-  savePrefs();
+  setTourPref(null);
   if (map) renderMapMarkers();
   else renderTourUi();
   showSnackbar('Объезд сброшен', 'Вернуть', () => {
-    uiPrefs.tour = previous;
-    savePrefs();
+    setTourPref(previous);
     if (map) renderMapMarkers();
     else renderTourUi();
   });
@@ -2069,7 +2372,7 @@ function renderMapSearchResults() {
     if (hint) {
       hint.classList.remove('hidden');
       hint.textContent = planMode
-        ? 'Введите адрес — найденная точка добавится в план.'
+        ? 'Введите адрес - найденная точка добавится в план.'
         : 'Введите улицу, дом, название магазина или наше название.';
     }
     return;
@@ -2146,7 +2449,8 @@ function fitMapToStores() {
   if (!map) return;
   const stores = mapStores();
   if (!stores.length) {
-    map.setView([52.965, 36.075], 12);
+    const city = currentCity || cityById(currentCityId());
+    map.setView(cityCenterOf(city), city.zoom || 12);
     return;
   }
   const bounds = L.latLngBounds(stores.map(s => [s.lat, s.lon]));
@@ -2169,13 +2473,15 @@ function rankStores(stores, query) {
   if (!tokens.length) return [];
 
   const ranked = [];
+  const city = currentCity || cityById(currentCityId());
   for (const store of stores) {
     if (!store) continue;
     const name = normalizeSearchText(store.name);
     const alias = normalizeSearchText(store.alias);
     const address = normalizeSearchText(store.address);
     const brand = normalizeSearchText(brandTitle(store.brand));
-    const route = normalizeSearchText(store.route || ORYOL_ROUTE);
+    const storeCity = store.city ? cityById(store.city) : city;
+    const route = normalizeSearchText(store.route || (storeCity && storeCity.name) || ORYOL_ROUTE);
     let score = 0;
     let matchedAll = true;
 
@@ -2213,7 +2519,8 @@ function searchResultHtml(store, kind) {
   const status = getStatus(store);
   const inPlan = planIds().includes(store.id);
   const brand = store.brand === 'magnit' || store.brand === 'pyaterochka' ? store.brand : 'other';
-  const routeLabel = store.route ? 'Маршрут «' + store.route + '»' : ORYOL_ROUTE + ' · на карте';
+  const city = currentCity || cityById(currentCityId());
+  const routeLabel = store.route ? 'Маршрут «' + store.route + '»' : (city.name || ORYOL_ROUTE) + ' · на карте';
   const address = store.address ? escapeHtml(store.address) : 'Адрес не указан';
   const alias = store.alias
     ? '<span class="search-result-alias">· ' + escapeHtml(store.alias) + '</span>'
@@ -2533,11 +2840,11 @@ function maybeSendPresence(force) {
     console.warn('Не удалось отправить геопозицию', error);
     if (!presenceTroubleShown) {
       presenceTroubleShown = true;
-      showSnackbar('Геопозиция не отправляется — проверьте интернет');
+      showSnackbar('Геопозиция не отправляется - проверьте интернет');
     }
   }).then(() => {
     presenceWriteBusy = false;
-    /* Пока запрос летел, пользователь мог выключить передачу — тогда
+    /* Пока запрос летел, пользователь мог выключить передачу - тогда
        удаляем запись ещё раз, чтобы она не «всплыла» после удаления. */
     if (!uiPrefs.shareLocation) {
       presenceWritePending = false;
@@ -3106,6 +3413,8 @@ function renderCounts() {
   if (allEl) allEl.textContent = String(counts.total);
   if (dueEl) dueEl.textContent = String(counts.due);
   if (okEl) okEl.textContent = String(counts.ok);
+  const title = $('#app-title');
+  if (title) title.textContent = currentCity ? currentCity.name : 'Объезд';
 }
 
 function routeVisitedSummary(name) {
@@ -3118,7 +3427,7 @@ function routeVisitedSummary(name) {
 /* --------------------------- Маршруты --------------------------- */
 
 function routeCardHtml(name, stores, counts) {
-  const isOryol = name === ORYOL_ROUTE;
+  const isMain = !!cityByRouteName(name);
   const isEmpty = stores.length === 0;
   const badgeClass = isEmpty ? 'route-badge empty' : (counts.due ? 'route-badge' : 'route-badge ok');
   const badgeText = isEmpty ? 'пусто' : (counts.due ? counts.due + ' пора' : 'всё в норме');
@@ -3135,7 +3444,7 @@ function routeCardHtml(name, stores, counts) {
   }
 
   let footLeft;
-  if (isEmpty) footLeft = isOryol ? 'На карте пока нет магазинов' : 'Добавьте магазины вручную';
+  if (isEmpty) footLeft = isMain ? 'На карте пока нет магазинов' : 'Добавьте магазины вручную';
   else if (counts.due) footLeft = counts.due + ' ' + plural(counts.due, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита';
   else if (lastVisit) {
     footLeft = 'Последний визит ' + formatDate(lastVisit) + ' · ' +
@@ -3147,14 +3456,14 @@ function routeCardHtml(name, stores, counts) {
         escapeHtml(lastStore ? visitAuthor(lastStore.id) || 'автор не указан' : 'автор не указан') + '</div>'
     : '';
 
-  const icon = isOryol
+  const icon = isMain
     ? '<svg class="icon route-card-icon"><use href="#i-map"/></svg>'
     : '';
-  const metaRight = isOryol
+  const metaRight = isMain
     ? 'все точки на карте'
     : 'срок ' + storePeriod(stores[0] || { period: null }) + ' дн.';
 
-  return '<button class="route-card' + (counts.due ? ' has-due' : '') + (isOryol ? ' route-card-oryol' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
+  return '<button class="route-card' + (counts.due ? ' has-due' : '') + (isMain ? ' route-card-oryol' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
     '<div class="route-card-head">' +
       '<div class="route-card-name">' + icon + escapeHtml(name) + '</div>' +
       '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' +
@@ -3180,10 +3489,15 @@ function renderRoutesList() {
   let html = '';
   let totalDue = 0;
 
-  const oryolStores = storesForRoute(ORYOL_ROUTE);
-  html += routeCardHtml(ORYOL_ROUTE, oryolStores, storeStatusCounts(oryolStores));
+  for (const city of cityList()) {
+    if (!city) continue;
+    const name = city.id === DEFAULT_CITY ? ORYOL_ROUTE : city.name;
+    const stores = storesForRoute(name);
+    html += routeCardHtml(name, stores, storeStatusCounts(stores));
+  }
 
   for (const name of ROUTE_NAMES) {
+    if (name === ORYOL_ROUTE) continue;
     const summary = routeVisitedSummary(name);
     totalDue += summary.counts.due;
     html += routeCardHtml(name, summary.stores, summary.counts);
@@ -3193,10 +3507,12 @@ function renderRoutesList() {
 
   const sub = $('#routes-sub');
   if (sub) {
+    const cities = cityList().map(city => city.name).filter(Boolean).join(', ');
     sub.textContent = totalDue
-      ? totalDue + ' ' + plural(totalDue, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита в дальних маршрутах. «Орёл» — все магазины с карты.'
-      : 'Все дальние маршруты в норме. «Орёл» — все магазины с карты, отметки общие.';
+      ? totalDue + ' ' + plural(totalDue, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита в дальних маршрутах. ' + cities + ' - все магазины на карте.'
+      : cities + ' - все магазины на карте, дальние маршруты в норме.';
   }
+  updateCityUi();
 }
 
 function brandMiniHtml(brand) {
@@ -3218,7 +3534,8 @@ function routeStoreStatusText(store, status) {
 function renderRouteDetail(name) {
   if (!isKnownRoute(name)) { go('routes'); return; }
 
-  const isOryol = name === ORYOL_ROUTE;
+  const routeCity = cityByRouteName(name);
+  const isMain = !!routeCity;
   const stores = storesForRoute(name).slice();
   const counts = storeStatusCounts(stores);
   const titleEl = $('#route-title');
@@ -3228,19 +3545,23 @@ function renderRouteDetail(name) {
   if (!overviewEl || !listEl) return;
 
   const routeAdd = $('#route-add');
-  if (routeAdd) routeAdd.classList.toggle('hidden', isOryol);
+  if (routeAdd) routeAdd.classList.toggle('hidden', isMain);
 
-  const query = isOryol ? oryolSearchQuery.trim() : '';
+  const query = isMain ? oryolSearchQuery.trim() : '';
   const matched = query ? rankStores(stores, query) : stores;
   const searchEl = $('#oryol-search');
   const searchInput = $('#oryol-search-input');
   const searchClear = $('#oryol-search-clear');
   const searchHint = $('#oryol-search-hint');
-  if (searchEl) searchEl.classList.toggle('hidden', !isOryol || !stores.length);
+  if (searchEl) searchEl.classList.toggle('hidden', !isMain || !stores.length);
   if (searchInput) {
-    const nextValue = isOryol ? oryolSearchQuery : '';
+    const nextValue = isMain ? oryolSearchQuery : '';
     if (document.activeElement !== searchInput || searchInput.value !== nextValue) {
       searchInput.value = nextValue;
+    }
+    if (isMain && routeCity) {
+      searchInput.placeholder = 'Найти адрес или магазин · ' + routeCity.name;
+      searchInput.setAttribute('aria-label', 'Поиск магазина по адресу в городе ' + routeCity.name);
     }
   }
   if (searchClear) searchClear.classList.toggle('hidden', !query);
@@ -3255,7 +3576,7 @@ function renderRouteDetail(name) {
 
   if (titleEl) titleEl.textContent = name;
   if (subEl) {
-    if (isOryol) {
+    if (isMain) {
       subEl.textContent = stores.length
         ? stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + ' · все точки на карте'
         : 'На карте пока нет магазинов';
@@ -3266,8 +3587,9 @@ function renderRouteDetail(name) {
     }
   }
 
-  const actionHtml = isOryol
-    ? '<button class="overview-action" type="button" data-action="show-map">На карту</button>'
+  const actionHtml = isMain
+    ? '<button class="overview-action" type="button" data-action="show-map"' +
+        (routeCity ? ' data-route-city="' + escapeHtml(routeCity.id) + '"' : '') + '>На карту</button>'
     : '<button class="overview-action" type="button" data-action="mark-route" data-route="' + escapeHtml(name) + '"' +
         (counts.due ? '' : ' disabled') + '>Отметить всё</button>';
 
@@ -3278,18 +3600,19 @@ function renderRouteDetail(name) {
     actionHtml;
 
   if (!stores.length) {
-    if (isOryol) {
+    if (isMain) {
       listEl.innerHTML =
         '<div class="empty-state">' +
           '<svg class="icon"><use href="#i-map"/></svg>' +
-          '<div><b>На карте пока нет магазинов.</b><br>Добавьте точку на карте — она сразу появится в этом списке.</div>' +
-          '<button class="mini-primary" type="button" data-action="show-map">Перейти к карте</button>' +
+          '<div><b>На карте пока нет магазинов.</b><br>Добавьте точку на карте - она сразу появится в этом списке.</div>' +
+          '<button class="mini-primary" type="button" data-action="show-map"' +
+            (routeCity ? ' data-route-city="' + escapeHtml(routeCity.id) + '"' : '') + '>Перейти к карте</button>' +
         '</div>';
     } else {
       listEl.innerHTML =
         '<div class="empty-state">' +
           '<svg class="icon"><use href="#i-store"/></svg>' +
-          '<div><b>Маршрут пуст.</b><br>В открытых данных здесь нет Магнита или Пятёрочки — добавьте магазины вручную.</div>' +
+          '<div><b>Маршрут пуст.</b><br>В открытых данных здесь нет Магнита или Пятёрочки - добавьте магазины вручную.</div>' +
           '<button class="mini-primary" type="button" data-action="add-route-store" data-route="' + escapeHtml(name) + '">Добавить магазин</button>' +
         '</div>';
     }
@@ -3300,7 +3623,7 @@ function renderRouteDetail(name) {
   const ok = [];
   matched.sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.address || '').localeCompare(b.address || '', 'ru'));
   if (query && !matched.length) {
-    listEl.innerHTML = '<div class="search-empty">Ничего не найдено в «Орле». Проверьте улицу, дом, название магазина или наше название.</div>';
+    listEl.innerHTML = '<div class="search-empty">Ничего не найдено · ' + escapeHtml(routeCity ? routeCity.name : currentCityName()) + '. Проверьте улицу, дом, название магазина или наше название.</div>';
     return;
   }
   for (const store of matched) {
@@ -3322,7 +3645,7 @@ function renderRouteDetail(name) {
       const commentLine = flatComment
         ? '<span class="route-store-comment">' +
             escapeHtml(flatComment.length > 90 ? flatComment.slice(0, 90).trimEnd() + '…' : flatComment) +
-            ' — ' + escapeHtml(commentAuthor(store.id) || 'автор не указан') +
+            ' - ' + escapeHtml(commentAuthor(store.id) || 'автор не указан') +
           '</span>'
         : '';
       const visitAuthorLine = status.at
@@ -3368,7 +3691,7 @@ function renderSettings() {
   const profileHint = $('#profile-hint');
   if (profileHint) {
     profileHint.textContent = uiPrefs.profile.name
-      ? 'Сейчас: ' + uiPrefs.profile.name + '. Имя можно изменить в любой момент — ваши подписи обновятся.'
+      ? 'Сейчас: ' + uiPrefs.profile.name + '. Имя можно изменить в любой момент - ваши подписи обновятся.'
       : 'Имя пока не выбрано. Визиты и комментарии будут без подписи, пока вы его не укажете.';
   }
 
@@ -3397,11 +3720,12 @@ function renderSettings() {
   if (stats) {
     const mapCount = mapStores().length;
     const routeCount = routeStores().length;
-    const visited = allStores.filter(s => visitTime(s.id)).length;
-    const due = allStores.filter(s => getStatus(s).due).length;
+    const currentStores = cityStores();
+    const visited = currentStores.filter(s => visitTime(s.id)).length;
+    const due = currentStores.filter(s => getStatus(s).due).length;
     const comments = Object.keys(state.comments).filter(id => commentFor(id)).length;
     stats.innerHTML =
-      '<span>Всего: <b>' + allStores.length + '</b></span>' +
+      '<span>Всего: <b>' + currentStores.length + '</b></span>' +
       '<span>На карте: <b>' + mapCount + '</b></span>' +
       '<span>В маршрутах: <b>' + routeCount + '</b></span>' +
       '<span>Посещено: <b>' + visited + '</b></span>' +
@@ -3441,7 +3765,7 @@ function updateSyncUi() {
   if (cloud.online) {
     setSyncStatus('online', 'Синхронизировано', 'Облако группы доступно');
   } else if (cloud.failed) {
-    setSyncStatus('local', 'Только на телефоне', 'Нет связи с облаком — данные сохранены локально');
+    setSyncStatus('local', 'Только на телефоне', 'Нет связи с облаком - данные сохранены локально');
   } else if (!cloud.db) {
     setSyncStatus('syncing', 'Подключение…', 'Проверяем облако группы');
   } else {
@@ -3472,7 +3796,7 @@ function renderStoreSheet() {
   const routeLabel = store.route ? 'Маршрут «' + escapeHtml(store.route) + '»' : 'На карте';
   const address = store.address
     ? escapeHtml(store.address)
-    : 'Адрес не указан — нажмите, чтобы заполнить';
+    : 'Адрес не указан - нажмите, чтобы заполнить';
   const comment = commentFor(store.id);
   const commentBy = commentMetaHtml(store.id);
 
@@ -3632,7 +3956,7 @@ function openStoreForm(id, coords, route, options) {
   if (title) title.textContent = store ? 'Редактировать точку' : (targetRoute ? 'Новый магазин маршрута' : 'Новая точка на карте');
   if (sub) {
     sub.textContent = targetRoute
-      ? 'Маршрут «' + targetRoute + '» — без карты'
+      ? 'Маршрут «' + targetRoute + '» - без карты'
       : (formState.lat != null ? 'Координаты: ' + formState.lat.toFixed(5) + ', ' + formState.lon.toFixed(5) : 'Точка на карте');
   }
 
@@ -3651,7 +3975,7 @@ function openStoreForm(id, coords, route, options) {
   const periodInput = $('#f-period');
   if (periodInput) periodInput.value = store && store.period ? String(store.period) : '';
   const periodHint = $('#f-period-hint');
-  if (periodHint) periodHint.textContent = 'Пусто — общий срок ' + clampPeriod(state.settings.periodDays) + ' дней.';
+  if (periodHint) periodHint.textContent = 'Пусто - общий срок ' + clampPeriod(state.settings.periodDays) + ' дней.';
 
   const addressHint = $('#f-address-hint');
   if (addressHint) addressHint.textContent = 'Можно оставить пустым и заполнить позже. Кнопка «Найти» определит адрес по координатам.';
@@ -3753,6 +4077,7 @@ function saveStoreForm(event) {
   } else {
     savedId = makeId(formState.route ? 'rp_u' : 'pt_u');
     const isRoute = !!formState.route;
+    const cityId = isRoute ? DEFAULT_CITY : currentCityId();
     state.custom[savedId] = {
       id: savedId,
       name,
@@ -3762,6 +4087,7 @@ function saveStoreForm(event) {
       lat: isRoute ? null : Number(formState.lat.toFixed(7)),
       lon: isRoute ? null : Number(formState.lon.toFixed(7)),
       route: isRoute ? formState.route : null,
+      city: cityId,
       osm: '',
       source: isRoute ? 'user' : 'map',
       upd: now
@@ -3995,7 +4321,7 @@ async function geocodeFormAddress() {
   const input = $('#f-address');
 
   if (!isValidCoord(formState.lat, formState.lon)) {
-    if (hint) hint.textContent = 'Сначала укажите точку на карте — тогда можно определить адрес.';
+    if (hint) hint.textContent = 'Сначала укажите точку на карте - тогда можно определить адрес.';
     return;
   }
 
@@ -4094,7 +4420,7 @@ function isNearDuplicate(brand, lat, lon, extra) {
     const dx = (store.lon - lon) * 111 * Math.cos(lat * Math.PI / 180);
     return Math.hypot(dx, dy) < 0.045;
   };
-  if (allStores.some(check)) return true;
+  if (cityStores().some(check)) return true;
   if (Array.isArray(extra) && extra.some(check)) return true;
   return false;
 }
@@ -4108,7 +4434,8 @@ async function importFromOsm(mode) {
 
   let bbox;
   if (mode === 'oryol') {
-    bbox = [52.85, 35.90, 53.05, 36.20];
+    const bounds = cityBoundsOf(currentCity);
+    bbox = [bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]];
   } else {
     const bounds = map.getBounds();
     bbox = [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()];
@@ -4164,6 +4491,7 @@ async function importFromOsm(mode) {
     let skipped = 0;
     const batch = [];
     const now = Date.now();
+    const cityId = currentCityId();
 
     for (const el of elements) {
       const parsed = parseOsmElement(el, onlyChains);
@@ -4185,6 +4513,7 @@ async function importFromOsm(mode) {
         lat: parsed.lat,
         lon: parsed.lon,
         route: null,
+        city: cityId,
         osm: parsed.osm,
         source: 'osm',
         upd: now + added
@@ -4585,6 +4914,7 @@ async function syncNow() {
 function handleAction(action, el) {
   const id = el && el.dataset ? el.dataset.id : '';
   const route = el && el.dataset ? el.dataset.route : '';
+  const city = el && el.dataset ? el.dataset.city : '';
 
   switch (action) {
     case 'toggle-visit': {
@@ -4626,9 +4956,16 @@ function handleAction(action, el) {
       if (targetRoute && targetRoute !== ORYOL_ROUTE) openStoreForm(null, null, targetRoute);
       break;
     }
-    case 'show-map':
-      go('map');
+    case 'show-map': {
+      const routeCity = cityByRouteName(currentRoute);
+      const targetCity = (el && el.dataset ? el.dataset.routeCity : '') || (routeCity ? routeCity.id : '');
+      if (targetCity && isValidCityId(targetCity) && targetCity !== currentCityId()) {
+        switchCity(targetCity).finally(() => go('map'));
+      } else {
+        go('map');
+      }
       break;
+    }
     case 'plan-remember':
       startTour();
       break;
@@ -4671,6 +5008,22 @@ function bindEvents() {
 
     if (event.target.closest('[data-open-add]')) {
       setAddMode(true);
+      return;
+    }
+
+    if (event.target.closest('#city-picker-open')) {
+      openCitySheet();
+      return;
+    }
+
+    if (event.target.closest('#city-sheet-close')) {
+      closeCitySheet();
+      return;
+    }
+
+    const cityEl = event.target.closest('[data-city]');
+    if (cityEl && cityEl.dataset.city) {
+      switchCity(cityEl.dataset.city);
       return;
     }
 
@@ -5030,31 +5383,42 @@ function tick() {
 
 async function loadSeeds() {
   let storesOk = false;
+  const city = currentCity || cityById(currentCityId());
+
+  const missing = cityList().filter(item => item && !Array.isArray(cityStoreSeeds[item.id]));
   try {
-    const storesRes = await fetch('js/stores.json', { cache: 'no-store' });
-    if (!storesRes.ok) throw new Error('stores.json: HTTP ' + storesRes.status);
-    const raw = await storesRes.json();
-    mapStoresSeed = (Array.isArray(raw) ? raw : [])
-      .map(normalizeSeedMapStore)
-      .filter(Boolean);
+    await Promise.all(missing.map(async (item) => {
+      const response = await fetch(item.stores || 'js/stores.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error((item.stores || 'stores.json') + ': HTTP ' + response.status);
+      const raw = await response.json();
+      cityStoreSeeds[item.id] = (Array.isArray(raw) ? raw : [])
+        .map(seed => normalizeSeedMapStore(seed, item.id))
+        .filter(Boolean);
+    }));
     storesOk = true;
   } catch (error) {
     console.warn('Не удалось загрузить точки карты', error);
   }
 
-  try {
-    const routesRes = await fetch('js/routes-seed.json', { cache: 'no-store' });
-    if (routesRes.ok) {
-      const raw = await routesRes.json();
-      const next = {};
-      for (const name of ROUTE_NAMES) {
-        const list = raw && Array.isArray(raw[name]) ? raw[name] : [];
-        next[name] = list.map(item => normalizeRouteSeedStore(item, name)).filter(Boolean);
+  mapStoresSeed = Array.isArray(cityStoreSeeds[city.id]) ? cityStoreSeeds[city.id] : [];
+
+  if (!routeSeedLoaded) {
+    try {
+      const routesRes = await fetch('js/routes-seed.json', { cache: 'no-store' });
+      if (routesRes.ok) {
+        const raw = await routesRes.json();
+        const next = {};
+        for (const name of ROUTE_NAMES) {
+          if (name === ORYOL_ROUTE) continue;
+          const list = raw && Array.isArray(raw[name]) ? raw[name] : [];
+          next[name] = list.map(item => normalizeRouteSeedStore(item, name)).filter(Boolean);
+        }
+        routeSeed = next;
       }
-      routeSeed = next;
+      routeSeedLoaded = true;
+    } catch (error) {
+      console.warn('Не удалось загрузить маршруты', error);
     }
-  } catch (error) {
-    console.warn('Не удалось загрузить маршруты', error);
   }
 
   seedsLoaded = true;
@@ -5071,6 +5435,8 @@ async function loadSeeds() {
   renderPlan();
   setMapFilter(mapFilter);
   renderTourUi();
+  renderRoutesList();
+  updateCityUi();
   if (map) {
     fitMapToStores();
   }
@@ -5080,12 +5446,174 @@ async function loadSeeds() {
   }
 }
 
+
+function updateCityUi() {
+  const city = currentCity || cityById(currentCityId());
+  const titleEl = document.getElementById('app-title');
+  if (titleEl) titleEl.textContent = city.name || 'Объезд';
+  const searchInput = document.getElementById('oryol-search-input');
+  if (searchInput) {
+    searchInput.placeholder = 'Найти адрес или магазин · ' + city.name;
+    searchInput.setAttribute('aria-label', 'Поиск магазина по адресу в городе ' + city.name);
+  }
+  const importText = document.getElementById('import-city-text');
+  if (importText) importText.textContent = 'Загрузить весь ' + city.name;
+  const versionEl = document.getElementById('app-version');
+  if (versionEl) versionEl.textContent = APP_VERSION;
+  document.title = (city.name || 'Объезд') + ' · Объезд магазинов';
+}
+
+function renderCitySheet() {
+  const list = document.getElementById('city-list');
+  if (!list) return;
+  const city = currentCity || cityById(currentCityId());
+  const items = cityList();
+  list.innerHTML = items.map(item => {
+    const active = item.id === city.id ? ' active' : '';
+    const seeded = cityStoreCounts[item.id];
+    const stores = seeded == null ? allStores.filter(s => s.city === item.id).length : seeded;
+    const name = escapeHtml(item.name || '');
+    const region = item.region ? ' · ' + escapeHtml(item.region) : '';
+    return '<button class="city-item' + active + '" type="button" data-city="' + escapeHtml(item.id || '') + '">' +
+      '<span class="city-item-main">' +
+        '<span class="city-item-name">' + name + region + '</span>' +
+        '<span class="city-item-meta">' + stores + ' ' + plural(stores, 'магазин', 'магазина', 'магазинов') + '</span>' +
+      '</span>' +
+      (active ? '<span class="city-item-check"><svg class="icon"><use href="#i-check"/></svg></span>' : '') +
+    '</button>';
+  }).join('');
+}
+
+function openCitySheet() {
+  renderCitySheet();
+  const sheet = document.getElementById('city-sheet');
+  if (sheet) openSheetEl(sheet);
+}
+
+function closeCitySheet() {
+  const sheet = document.getElementById('city-sheet');
+  if (sheet && openedSheetEl === sheet) closeSheets();
+  else if (sheet) {
+    sheet.classList.remove('open');
+    sheet.classList.add('hidden');
+  }
+}
+
+async function switchCity(cityId) {
+  if (!isValidCityId(cityId)) return;
+  if (currentCity && currentCity.id === cityId) {
+    closeCitySheet();
+    return;
+  }
+
+  uiPrefs.city = cityId;
+  savePrefs();
+
+  closeCitySheet();
+
+  currentCity = cityById(cityId);
+  uiPrefs.plan = planIds().slice();
+  uiPrefs.tour = tourPref();
+
+  if (map) {
+    try {
+      map.eachLayer(layer => {
+        if (layer === tileLight) return;
+        if (isClusterInternalLayer(layer)) return;
+        if (planLayer && layer === planLayer) return;
+        if (tourLayer && layer === tourLayer) return;
+        if (presenceLayer && layer === presenceLayer) return;
+        if (planLine && layer === planLine) return;
+        if (localBaseLayer && layer === localBaseLayer) {
+          try { map.removeLayer(layer); } catch (e) {}
+          return;
+        }
+        try { map.removeLayer(layer); } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
+  if (clusterLayers) {
+    try {
+      clusterLayers.ok.clearLayers();
+      clusterLayers.due.clearLayers();
+    } catch (e) {}
+  }
+  markers.clear();
+  if (planLayer) {
+    try { planLayer.clearLayers(); } catch (e) {}
+  }
+  if (tourLayer) {
+    try { tourLayer.clearLayers(); } catch (e) {}
+  }
+  if (planLine && map) {
+    try { map.removeLayer(planLine); } catch (e) {}
+  }
+  planLine = null;
+  planIconState = new Map();
+  tourVisual = { activeId: null, pending: new Set() };
+  tourVisualKey = '';
+
+  mapAssetsRequested = false;
+  mapAssetsToken += 1;
+  localLayers = null;
+  localBaseLayer = null;
+  clearLocalSegments();
+  mapLabelLayer = null;
+  mapLabelMarkers = [];
+
+  if (!map) {
+    initMap();
+  } else {
+    applyBasemap();
+  }
+  loadMapAssets();
+
+  mapStoresSeed = [];
+  seedsLoaded = false;
+  rebuildStoreCache();
+
+  await loadSeeds();
+
+  if (map) {
+    const city = currentCity;
+    try {
+      map.setView(cityCenterOf(city), city.zoom || 12, { animate: true });
+    } catch (e) {}
+    fitMapToStores();
+  }
+
+  renderCounts();
+  renderRoutesList();
+  updateCityUi();
+  renderPlan();
+  renderTourUi();
+  if (currentScreen === 'routes') {
+    renderRoutesList();
+  }
+  if (currentScreen === 'route' && currentRoute && !isKnownRoute(currentRoute)) {
+    go('routes');
+  } else if (currentScreen === 'route' && currentRoute) {
+    renderRouteDetail(currentRoute);
+  }
+
+  showSnackbar('Город: ' + currentCity.name);
+}
+
+
 async function bootstrap() {
   loadLocal();
+  await loadCities();
+  await loadCityStoreCounts();
+  currentCity = cityById(uiPrefs.city || citiesConfig.default);
+  uiPrefs.city = currentCity.id;
+  uiPrefs.plan = planIds().slice();
+  uiPrefs.tour = tourPref();
   initMap();
   bindEvents();
   go(uiPrefs.screen || 'map');
   updateAddUi();
+  updateCityUi();
 
   await loadSeeds();
   hideBoot();

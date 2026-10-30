@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css?v=2.9.3">
+  <link rel="stylesheet" href="css/app.css?v=2.10.0">
 </head>
 <body>
 
@@ -62,13 +62,14 @@
 
     <div class="map-top">
       <div class="map-top-row">
-        <div class="app-badge">
+        <button id="city-picker-open" class="app-badge app-badge-btn" type="button" aria-label="Выбрать населённый пункт">
           <img class="app-logo" src="icons/logo-tile-192.png" alt="" width="38" height="38">
           <div class="app-badge-text">
-            <span class="app-title">Объезд</span>
-            <span id="sync-status" class="sync-status"><i class="dot"></i><span id="sync-text">Загрузка…</span></span>
+            <span id="app-title" class="app-title">Объезд</span>
+            <span id="sync-status" class="sync-status"><i class="dot"></i><span id="sync-text">Город</span></span>
           </div>
-        </div>
+          <svg class="icon app-badge-chevron"><use href="#i-chevron"/></svg>
+        </button>
         <button id="map-search-open" class="map-search-open" type="button" aria-label="Найти магазин по адресу">
           <svg class="icon"><use href="#i-search"/></svg>
           <span>Поиск адреса</span>
@@ -192,7 +193,7 @@
     <header class="screen-head">
       <div>
         <h1>Маршруты</h1>
-        <p id="routes-sub">Орёл — все магазины на карте, дальние маршруты — без карты.</p>
+        <p id="routes-sub">Орёл, Брянск и Железногорск — все магазины на карте, дальние маршруты — без карты.</p>
       </div>
     </header>
     <div id="routes-list" class="routes-list"></div>
@@ -216,7 +217,7 @@
     <div id="oryol-search" class="route-search hidden">
       <div class="search-field">
         <svg class="icon"><use href="#i-search"/></svg>
-        <input id="oryol-search-input" type="search" placeholder="Найти адрес или магазин в «Орле»" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск магазина по адресу в маршруте Орёл">
+        <input id="oryol-search-input" type="search" placeholder="Найти адрес или магазин в городе" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск магазина по адресу в маршруте">
         <button id="oryol-search-clear" class="search-clear hidden" type="button" aria-label="Очистить поиск">
           <svg class="icon"><use href="#i-x"/></svg>
         </button>
@@ -332,7 +333,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-layers"/></svg></div>
           <div>
             <h2>Карта и магазины</h2>
-            <p>Локальная схема Орла и открытые данные.</p>
+            <p>Локальная схема города и открытые данные.</p>
           </div>
         </div>
         <div class="basemap-title">
@@ -347,7 +348,7 @@
             <b>Светлая</b><small>онлайн, OSM</small>
           </button>
         </div>
-        <p class="fine">Схема Орла встроена в приложение: улицы и маркеры видны без интернета. Светлая подложка включается только по желанию и требует связи.</p>
+        <p class="fine">Схема города встроена в приложение: улицы и маркеры видны без интернета. Светлая подложка включается только по желанию и требует связи.</p>
         <button id="btn-import-osm" class="block" type="button">
           <svg class="icon"><use href="#i-download"/></svg> Загрузить Магнит и Пятёрочку из OSM
         </button>
@@ -359,7 +360,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.9.3</span></p>
+            <p>Версия <span id="app-version">2.10.0</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -387,6 +388,21 @@
 
 <!-- ================= КАРТОЧКА МАГАЗИНА ================= -->
 <div id="sheet-backdrop" class="sheet-backdrop hidden"></div>
+
+<!-- ================= ВЫБОР ГОРОДА ================= -->
+<div id="city-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="city-sheet-title">
+  <div class="sheet-grip" data-close-sheet></div>
+  <div class="sheet-head">
+    <div>
+      <h2 id="city-sheet-title">Выбрать населённый пункт</h2>
+      <p class="fine">Карты, точки и план/объезд переключаются по городу</p>
+    </div>
+    <button id="city-sheet-close" class="icon-btn" type="button" aria-label="Закрыть" data-close-sheet>
+      <svg class="icon"><use href="#i-x"/></svg>
+    </button>
+  </div>
+  <div class="city-list" id="city-list"></div>
+</div>
 
 <div id="store-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="store-sheet-title">
   <div class="sheet-grip" data-close-sheet></div>
@@ -493,7 +509,7 @@
       <svg class="icon"><use href="#i-download"/></svg> Загрузить видимую область
     </button>
     <button id="import-oryol" class="block" type="button">
-      <svg class="icon"><use href="#i-map"/></svg> Загрузить весь Орёл
+      <svg class="icon"><use href="#i-map"/></svg> <span id="import-city-text">Загрузить весь город</span>
     </button>
 
     <div id="import-status" class="import-status"></div>
@@ -533,6 +549,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js?v=2.9.3" defer></script>
+<script src="js/app.js?v=2.10.0" defer></script>
 </body>
 </html>

@@ -1,11 +1,14 @@
 /* Service worker: офлайн-оболочка приложения */
-const CACHE_NAME = 'obezd-337d642d78';
+const CACHE_NAME = 'obezd-bafdd6e34b';
 
-const LOD1 = [];
-for (let row = 0; row < 8; row += 1) {
-  for (let col = 0; col < 8; col += 1) {
-    LOD1.push('./map/lod1/' + row + '_' + col + '.webp');
+function lod1Paths(dir) {
+  const paths = [];
+  for (let row = 0; row < 8; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      paths.push('./' + dir + '/lod1/' + row + '_' + col + '.webp');
+    }
   }
+  return paths;
 }
 
 const APP_SHELL = [
@@ -13,12 +16,23 @@ const APP_SHELL = [
   './index.html',
   './css/app.css',
   './js/app.js',
+  './js/cities.json',
   './js/stores.json',
+  './js/stores-bryansk.json',
+  './js/stores-zheleznogorsk.json',
   './js/routes-seed.json',
   './map/oryol-base.webp',
   './map/labels.json',
   './map/layers.json',
-  ...LOD1,
+  ...lod1Paths('map'),
+  './map/bryansk/base.webp',
+  './map/bryansk/labels.json',
+  './map/bryansk/layers.json',
+  ...lod1Paths('map/bryansk'),
+  './map/zheleznogorsk/base.webp',
+  './map/zheleznogorsk/labels.json',
+  './map/zheleznogorsk/layers.json',
+  ...lod1Paths('map/zheleznogorsk'),
   './manifest.json',
   './icons/icon-180.png',
   './icons/icon-192.png',
