@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css?v=2.10.1">
+  <link rel="stylesheet" href="css/app.css?v=2.10.2">
 </head>
 <body>
 
@@ -354,7 +354,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.10.1</span></p>
+            <p>Версия <span id="app-version">2.10.2</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -526,6 +526,16 @@
       <input id="modal-pass-input" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Введите пароль">
       <p id="modal-pass-error" class="modal-pass-error hidden">Неверный пароль. Попробуйте ещё раз.</p>
     </div>
+    <div id="modal-date" class="modal-pass hidden">
+      <label class="modal-pass-label" for="modal-date-input">Дата посещения</label>
+      <input id="modal-date-input" type="date" inputmode="none">
+      <div class="modal-date-presets">
+        <button type="button" data-days="0">Сегодня</button>
+        <button type="button" data-days="1">Вчера</button>
+        <button type="button" data-days="2">Позавчера</button>
+      </div>
+      <p id="modal-date-error" class="modal-pass-error hidden">Выберите дату не позже сегодняшней.</p>
+    </div>
     <div class="modal-actions">
       <button id="modal-cancel" type="button">Отмена</button>
       <button id="modal-ok" class="primary" type="button">ОК</button>
@@ -543,6 +553,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js?v=2.10.1" defer></script>
+<script src="js/app.js?v=2.10.2" defer></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.10.1';
+const APP_VERSION = '2.10.2';
 const DEFAULT_CITY = 'orel';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
@@ -3070,35 +3070,134 @@ function onMarkerClick(id) {
 
 let snackbarTimer = null;
 
-function showSnackbar(text, actionLabel, action) {
-  const bar = $('#snackbar');
-  const textEl = $('#snackbar-text');
-  const actionEl = $('#snackbar-action');
-  if (!bar || !textEl || !actionEl) return;
-
-  clearTimeout(snackbarTimer);
-  textEl.textContent = text;
-
-  if (actionLabel && typeof action === 'function') {
-    actionEl.textContent = actionLabel;
-    actionEl.classList.remove('hidden');
-    actionEl.onclick = () => {
-      hideSnackbar();
-      try { action(); } catch (e) { console.error(e); }
-    };
-  } else {
-    actionEl.classList.add('hidden');
-    actionEl.onclick = null;
-  }
-
-  bar.classList.remove('hidden');
-  snackbarTimer = setTimeout(hideSnackbar, actionLabel ? 5500 : 3200);
-}
+/* Всплывающие уведомления отключены: они перекрывали интерфейс на каждом действии. */
+function showSnackbar() {}
 
 function hideSnackbar() {
   clearTimeout(snackbarTimer);
   const bar = $('#snackbar');
   if (bar) bar.classList.add('hidden');
+}
+
+function dateInputValue(ts) {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function parseDateInputValue(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]) - 1;
+  const d = Number(match[3]);
+  const date = new Date(y, m, d);
+  if (Number.isNaN(date.getTime())) return null;
+  if (date.getFullYear() !== y || date.getMonth() !== m || date.getDate() !== d) return null;
+  return startOfDay(date.getTime());
+}
+
+function dateDialog(title, text, okLabel) {
+  return new Promise((resolve) => {
+    const modal = $('#modal');
+    const titleEl = $('#modal-title');
+    const textEl = $('#modal-text');
+    const okBtn = $('#modal-ok');
+    const cancelBtn = $('#modal-cancel');
+    const nameWrap = $('#modal-name');
+    const nameInput = $('#modal-name-input');
+    const passWrap = $('#modal-pass');
+    const passInput = $('#modal-pass-input');
+    const dateWrap = $('#modal-date');
+    const dateInput = $('#modal-date-input');
+    const dateError = $('#modal-date-error');
+    if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !dateWrap || !dateInput) {
+      const answer = window.prompt(text, dateInputValue(startOfDay(Date.now() - DAY_MS)));
+      resolve(parseDateInputValue(answer));
+      return;
+    }
+
+    const today = todayStart();
+    const presets = Array.from(dateWrap.querySelectorAll('[data-days]'));
+    const markPreset = () => {
+      presets.forEach((btn) => {
+        const value = dateInputValue(today - Number(btn.dataset.days) * DAY_MS);
+        btn.classList.toggle('active', dateInput.value === value);
+      });
+    };
+
+    titleEl.textContent = title;
+    textEl.textContent = text;
+    okBtn.textContent = okLabel || 'Отметить';
+    okBtn.classList.remove('danger');
+    okBtn.classList.add('primary');
+    cancelBtn.textContent = 'Отмена';
+    if (nameWrap) nameWrap.classList.add('hidden');
+    if (nameInput) {
+      nameInput.value = '';
+      nameInput.onkeydown = null;
+    }
+    if (passWrap) passWrap.classList.add('hidden');
+    if (passInput) {
+      passInput.value = '';
+      passInput.onkeydown = null;
+    }
+    dateWrap.classList.remove('hidden');
+    dateInput.max = dateInputValue(today);
+    dateInput.value = dateInputValue(today - DAY_MS);
+    if (dateError) dateError.classList.add('hidden');
+    markPreset();
+    modal.classList.remove('hidden');
+    const focusTimer = setTimeout(() => {
+      try { dateInput.focus(); } catch (e) { /* ignore */ }
+    }, 60);
+
+    const cleanup = () => {
+      clearTimeout(focusTimer);
+      modal.classList.add('hidden');
+      dateWrap.classList.add('hidden');
+      if (dateError) dateError.classList.add('hidden');
+      presets.forEach((btn) => { btn.onclick = null; });
+      dateInput.onchange = null;
+      dateInput.onkeydown = null;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.onclick = null;
+    };
+
+    const submit = () => {
+      const ts = parseDateInputValue(dateInput.value);
+      if (ts == null || ts > today) {
+        if (dateError) dateError.classList.remove('hidden');
+        try { dateInput.focus(); } catch (e) { /* ignore */ }
+        return;
+      }
+      cleanup();
+      resolve(ts);
+    };
+
+    presets.forEach((btn) => {
+      btn.onclick = () => {
+        dateInput.value = dateInputValue(today - Number(btn.dataset.days) * DAY_MS);
+        if (dateError) dateError.classList.add('hidden');
+        markPreset();
+      };
+    });
+    dateInput.onchange = () => {
+      if (dateError) dateError.classList.add('hidden');
+      markPreset();
+    };
+    dateInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      }
+    };
+    okBtn.onclick = submit;
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    modal.onclick = (event) => {
+      if (event.target === modal) { cleanup(); resolve(null); }
+    };
+  });
 }
 
 function nameDialog(title, text, okLabel, cancelLabel, initial) {
@@ -3113,6 +3212,7 @@ function nameDialog(title, text, okLabel, cancelLabel, initial) {
     const nameError = $('#modal-name-error');
     const passWrap = $('#modal-pass');
     const passInput = $('#modal-pass-input');
+    const dateWrap = $('#modal-date');
     if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !nameWrap || !nameInput) {
       const answer = window.prompt(text, initial || '');
       resolve(normalizeProfileName(answer) || null);
@@ -3130,6 +3230,7 @@ function nameDialog(title, text, okLabel, cancelLabel, initial) {
       passInput.value = '';
       passInput.onkeydown = null;
     }
+    if (dateWrap) dateWrap.classList.add('hidden');
     nameWrap.classList.remove('hidden');
     nameInput.value = initial || '';
     if (nameError) nameError.classList.add('hidden');
@@ -3190,6 +3291,7 @@ function confirmDialog(title, text, okLabel, danger) {
     const passInput = $('#modal-pass-input');
     const nameWrap = $('#modal-name');
     const nameInput = $('#modal-name-input');
+    const dateWrap = $('#modal-date');
     if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn) {
       resolve(window.confirm(text));
       return;
@@ -3206,6 +3308,7 @@ function confirmDialog(title, text, okLabel, danger) {
       passInput.value = '';
       passInput.onkeydown = null;
     }
+    if (dateWrap) dateWrap.classList.add('hidden');
 
     titleEl.textContent = title;
     textEl.textContent = text;
@@ -3253,6 +3356,7 @@ function passwordDialog(title, text, okLabel, danger) {
     const passError = $('#modal-pass-error');
     const nameWrap = $('#modal-name');
     const nameInput = $('#modal-name-input');
+    const dateWrap = $('#modal-date');
     if (!modal || !titleEl || !textEl || !okBtn || !cancelBtn || !passWrap || !passInput) {
       resolve(passwordMatches(window.prompt(text, '')));
       return;
@@ -3269,6 +3373,7 @@ function passwordDialog(title, text, okLabel, danger) {
       nameInput.value = '';
       nameInput.onkeydown = null;
     }
+    if (dateWrap) dateWrap.classList.add('hidden');
     passWrap.classList.remove('hidden');
     passInput.value = '';
     if (passError) passError.classList.add('hidden');
@@ -3655,10 +3760,15 @@ function renderRouteDetail(name) {
           '</span>' +
           visitAuthorLine +
         '</div>' +
-        '<button class="visit-btn ' + (status.due ? 'due' : 'ok') + '" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '"' +
-          ' aria-label="' + (status.due ? 'Отметить визит' : 'Снять отметку визита') + '" title="' + (status.due ? 'Отметить визит' : 'Снять отметку') + '">' +
-          '<svg class="icon"><use href="#' + (status.due ? 'i-check' : 'i-undo') + '"/></svg>' +
-        '</button>' +
+        '<div class="route-store-actions">' +
+          '<button class="visit-btn back" type="button" data-action="mark-visit-back" data-id="' + escapeHtml(store.id) + '" title="Отметить визит задним числом">' +
+            '<svg class="icon"><use href="#i-plus"/></svg>' +
+          '</button>' +
+          '<button class="visit-btn ' + (status.due ? 'due' : 'ok') + '" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '"' +
+            ' aria-label="' + (status.due ? 'Отметить визит' : 'Снять отметку визита') + '" title="' + (status.due ? 'Отметить визит' : 'Снять отметку') + '">' +
+            '<svg class="icon"><use href="#' + (status.due ? 'i-check' : 'i-undo') + '"/></svg>' +
+          '</button>' +
+        '</div>' +
       '</div>';
     }
 
@@ -3794,7 +3904,7 @@ function renderStoreSheet() {
   const progress = status.at ? Math.round(status.progress * 100) : 0;
   let timerSub = status.at
     ? 'Последний визит: ' + formatDate(status.at) + ' · ' + status.sub
-    : 'Отметьте визит, когда приедете в магазин.';
+    : '';
   const visitByLine = status.at
     ? '<div class="timer-author">Последний посетитель: <b>' +
         escapeHtml(visitAuthor(store.id) || 'автор не указан') + '</b></div>'
@@ -3802,10 +3912,10 @@ function renderStoreSheet() {
 
   let visitButton;
   if (status.due) {
-    visitButton = '<button class="btn primary wide" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '" data-mark="1">' +
+    visitButton = '<button class="btn primary wide sheet-visit-main" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '" data-mark="1">' +
       '<svg class="icon"><use href="#i-check"/></svg> Отметить визит</button>';
   } else {
-    visitButton = '<button class="btn wide" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '" data-mark="0">' +
+    visitButton = '<button class="btn wide sheet-visit-main" type="button" data-action="toggle-visit" data-id="' + escapeHtml(store.id) + '" data-mark="0">' +
       '<svg class="icon"><use href="#i-undo"/></svg> Снять отметку визита</button>';
   }
 
@@ -3843,9 +3953,10 @@ function renderStoreSheet() {
           '<span class="timer-period">' + (store.period ? 'Свой срок' : 'Срок') + ' ' + status.period + ' дн.</span>' +
         '</div>' +
         '<div class="timer-bar"><i style="width:' + progress + '%"></i></div>' +
-        '<div class="timer-sub">' + escapeHtml(timerSub) + '</div>' +
+        (timerSub ? '<div class="timer-sub">' + escapeHtml(timerSub) + '</div>' : '') +
         visitByLine +
       '</div>' +
+      visitButton +
       '<div class="comment-card">' +
         '<div class="comment-head">' +
           '<svg class="icon"><use href="#i-pencil"/></svg>' +
@@ -3857,10 +3968,11 @@ function renderStoreSheet() {
         (commentBy ? '<div id="store-comment-meta" class="comment-meta">' + commentBy + '</div>' : '<div id="store-comment-meta" class="comment-meta"></div>') +
         '<textarea id="store-comment" class="comment-input" rows="3" maxlength="' + COMMENT_MAX +
           '" placeholder="Заметка о точке или посещении">' + escapeHtml(comment) + '</textarea>' +
-        '<div class="comment-hint">Сохраняется автоматически и остаётся, пока вы его не измените или не очистите.</div>' +
       '</div>' +
       '<div class="sheet-actions">' +
-        visitButton +
+        '<button class="btn ghost wide timer-mark-back" type="button" data-action="mark-visit-back" data-id="' + escapeHtml(store.id) + '">' +
+          '<svg class="icon"><use href="#i-clock"/></svg> Отметить посещение задним числом' +
+        '</button>' +
         '<button class="btn" type="button" data-action="edit-store" data-id="' + escapeHtml(store.id) + '">' +
           '<svg class="icon"><use href="#i-pencil"/></svg> Изменить</button>' +
         '<button class="btn danger" type="button" data-action="delete-store" data-id="' + escapeHtml(store.id) + '">' +
@@ -4111,14 +4223,37 @@ function toggleStoreVisit(id, explicitMark) {
   if (!store) return;
   const mark = explicitMark == null ? getStatus(store).due : !!explicitMark;
   setStoreVisited(id, mark);
-  const tourFinished = mark && uiPrefs.tour && !tourStats().activeId;
-  showSnackbar(
-    tourFinished ? 'Объезд завершён · все точки в норме' : (mark ? 'Визит отмечен' : 'Отметка визита снята'),
-    mark ? 'Отменить' : 'Вернуть',
-    () => {
-      setStoreVisited(id, !mark);
-    }
+  if (mark && uiPrefs.tour && !tourStats().activeId) {
+    showSnackbar('Объезд завершён · все точки в норме');
+  }
+}
+
+function markStoreVisitAt(id, at) {
+  const store = getStore(id);
+  if (!store) return;
+  const ts = startOfDay(at);
+  if (!Number.isFinite(ts)) return;
+  const now = Date.now();
+  state.visits[id] = { at: ts, upd: now };
+  const author = currentAuthor();
+  if (author) state.visits[id].by = author;
+  commit();
+}
+
+function markStoreVisitBack(id, days) {
+  const back = Math.max(0, Math.min(365, Math.floor(days) || 0));
+  markStoreVisitAt(id, Date.now() - back * DAY_MS);
+}
+
+async function openVisitBackDialog(id) {
+  const store = getStore(id);
+  if (!store) return;
+  const at = await dateDialog(
+    'Отметить посещение',
+    'Когда вы были в магазине «' + store.name + '»?',
+    'Отметить'
   );
+  if (at != null) markStoreVisitAt(id, at);
 }
 
 async function deleteStoreById(id) {
@@ -4911,6 +5046,10 @@ function handleAction(action, el) {
     case 'toggle-visit': {
       const markAttr = el.dataset.mark;
       toggleStoreVisit(id, markAttr == null ? null : markAttr === '1');
+      break;
+    }
+    case 'mark-visit-back': {
+      openVisitBackDialog(id);
       break;
     }
     case 'edit-store':

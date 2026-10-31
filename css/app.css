@@ -2168,7 +2168,7 @@ b, strong {
 
 .route-store {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -2184,6 +2184,13 @@ b, strong {
 .route-store:active {
   transform: scale(0.995);
   border-color: var(--line-strong);
+}
+
+.route-store-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .status-dot {
@@ -2314,6 +2321,12 @@ b, strong {
   background: rgba(239, 68, 68, 0.12);
   border-color: rgba(239, 68, 68, 0.24);
   color: var(--red-text);
+}
+
+.visit-btn.back {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #60a5fa;
 }
 
 .visit-btn .icon {
@@ -3022,6 +3035,16 @@ b, strong {
   font-weight: 650;
 }
 
+.sheet-visit-main {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.timer-mark-back {
+  width: 100%;
+  min-height: 38px;
+}
+
 .comment-card {
   display: flex;
   flex-direction: column;
@@ -3455,7 +3478,8 @@ b, strong {
 }
 
 #modal-pass-input,
-#modal-name-input {
+#modal-name-input,
+#modal-date-input {
   width: 100%;
   min-height: 44px;
   padding: 9px 12px;
@@ -3472,11 +3496,41 @@ b, strong {
   letter-spacing: 0;
 }
 
+#modal-date-input {
+  letter-spacing: 0;
+  color-scheme: dark;
+}
+
 #modal-pass-input:focus,
-#modal-name-input:focus {
+#modal-name-input:focus,
+#modal-date-input:focus {
   outline: none;
   border-color: rgba(34, 197, 94, 0.55);
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.13);
+}
+
+.modal-date-presets {
+  display: flex;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.modal-date-presets button {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.modal-date-presets button.active {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: var(--green-text);
 }
 
 .modal-card .modal-pass-error {
