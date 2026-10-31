@@ -624,20 +624,16 @@ b, strong {
 
 .map-search-open {
   pointer-events: auto;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
   height: 42px;
-  padding: 0 13px;
+  padding: 0;
   border-radius: 14px;
-  background: rgba(15, 24, 42, 0.92);
+  background: rgba(21, 31, 49, 0.94);
   border: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12.5px;
-  text-align: left;
+  color: var(--text);
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow-soft);
 }
@@ -647,17 +643,9 @@ b, strong {
 }
 
 .map-search-open .icon {
-  width: 17px;
-  height: 17px;
-  color: var(--muted-2);
-}
-
-.map-search-open span {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: 19px;
+  height: 19px;
+  color: var(--muted);
 }
 
 .map-search {
@@ -3660,8 +3648,6 @@ b, strong {
 @media (max-width: 430px) {
   #sync-text { display: none; }
   .sync-status { max-width: none; }
-  .map-search-open { padding: 0 10px; gap: 7px; }
-  .map-search-open span { font-size: 12px; }
 }
 
 @media (max-width: 360px) {
@@ -3674,6 +3660,7 @@ b, strong {
   .sync-status { max-width: 112px; }
   .map-actions { gap: 5px; }
   .icon-btn { width: 38px; height: 38px; border-radius: 12px; }
+  .map-search-open { width: 38px; height: 38px; border-radius: 12px; }
   .map-banner { font-size: 11px; }
   .chip { padding: 6px 10px; font-size: 11.5px; }
   .segmented button { font-size: 10.5px; gap: 3px; }
