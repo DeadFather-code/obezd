@@ -45,6 +45,7 @@
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-warning" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5Z"/></symbol>
 </svg>
 
 <div id="boot" class="boot">
@@ -74,13 +75,16 @@
           <button id="map-search-open" class="map-search-open" type="button" aria-label="Найти магазин по адресу" title="Поиск адреса">
             <svg class="icon"><use href="#i-search"/></svg>
           </button>
+          <button id="map-filter-open" class="icon-btn map-filter-open" type="button" aria-label="Фильтр по статусу" aria-haspopup="true" aria-expanded="false" aria-controls="map-filter-menu" title="Фильтр">
+            <svg class="icon"><use href="#i-filter"/></svg>
+          </button>
           <button id="btn-basemap" class="icon-btn basemap-toggle" type="button" title="Включить онлайн-карту" aria-label="Переключить карту онлайн или офлайн" aria-pressed="false">
             <svg class="icon"><use href="#i-cloud"/></svg>
             <span class="basemap-mode">офлайн</span>
           </button>
         </div>
       </div>
-      <div class="map-chips" role="group" aria-label="Фильтр по статусу">
+      <div id="map-filter-menu" class="map-chips" role="group" aria-label="Фильтр по статусу">
         <button class="chip active" type="button" data-filter="all">Все <b id="count-all">0</b></button>
         <button class="chip chip-due" type="button" data-filter="due">Пора <b id="count-due">0</b></button>
         <button class="chip chip-ok" type="button" data-filter="ok">В норме <b id="count-ok">0</b></button>

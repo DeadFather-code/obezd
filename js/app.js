@@ -133,6 +133,7 @@ let editMode = false;
 let addMode = false;
 let planMode = false;
 let mapSearchOpen = false;
+let filterMenuOpen = false;
 let mapSearchQuery = '';
 let planLayer = null;
 let planLine = null;
@@ -2324,6 +2325,8 @@ function setMapSearchOpen(on) {
   }
   mapSearchOpen = next;
 
+  if (next) closeFilterMenu();
+
   const panel = $('#map-search-panel');
   if (panel) panel.classList.toggle('hidden', !next);
   const openBtn = $('#map-search-open');
@@ -2442,7 +2445,27 @@ function setMapFilter(filter) {
   $$('.map-chips .chip').forEach(chip => {
     chip.classList.toggle('active', chip.dataset.filter === mapFilter);
   });
+  const filterBtn = $('#map-filter-open');
+  if (filterBtn) {
+    const active = mapFilter !== 'all';
+    filterBtn.classList.toggle('is-active', active);
+    filterBtn.setAttribute('aria-label', active ? 'Фильтр: ' + (mapFilter === 'due' ? 'пора' : 'в норме') : 'Фильтр по статусу');
+  }
   renderMapMarkers();
+}
+
+function setFilterMenuOpen(on) {
+  const next = !!on;
+  if (next === filterMenuOpen) return;
+  filterMenuOpen = next;
+  const menu = $('#map-filter-menu');
+  const btn = $('#map-filter-open');
+  if (menu) menu.classList.toggle('open', next);
+  if (btn) btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+}
+
+function closeFilterMenu() {
+  if (filterMenuOpen) setFilterMenuOpen(false);
 }
 
 function fitMapToStores() {
@@ -5239,7 +5262,35 @@ function bindEvents() {
   });
 
   $$('.map-chips .chip').forEach(chip => {
-    chip.addEventListener('click', () => setMapFilter(chip.dataset.filter));
+    chip.addEventListener('click', () => {
+      setMapFilter(chip.dataset.filter);
+      closeFilterMenu();
+    });
+  });
+
+  const filterOpenBtn = $('#map-filter-open');
+  if (filterOpenBtn) {
+    filterOpenBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (!filterMenuOpen) closeMapSearch();
+      setFilterMenuOpen(!filterMenuOpen);
+    });
+  }
+
+  document.addEventListener('click', (event) => {
+    if (!filterMenuOpen) return;
+    const menu = $('#map-filter-menu');
+    const btn = $('#map-filter-open');
+    if (menu && menu.contains(event.target)) return;
+    if (btn && btn.contains(event.target)) return;
+    closeFilterMenu();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !filterMenuOpen) return;
+    closeFilterMenu();
+    const btn = $('#map-filter-open');
+    if (btn) btn.focus();
   });
 
   const oryolSearchInput = $('#oryol-search-input');

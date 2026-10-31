@@ -322,7 +322,7 @@ b, strong {
 
 .map-top-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
@@ -562,18 +562,57 @@ b, strong {
 }
 
 .map-chips {
+  position: absolute;
+  top: 60px;
+  right: 0;
+  z-index: 3;
   display: flex;
-  gap: 7px;
-  align-self: flex-start;
-  max-width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding: 1px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 178px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(15, 24, 42, 0.98);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
   pointer-events: auto;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
 }
 
-.map-chips::-webkit-scrollbar {
-  display: none;
+.map-chips.open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.map-chips .chip {
+  width: 100%;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.map-chips .chip:hover,
+.map-chips .chip.active {
+  background: var(--panel-2);
+  border-color: var(--line-strong);
+}
+
+.map-chips .chip b {
+  margin-left: auto;
+}
+
+.map-filter-open.is-active {
+  color: var(--blue);
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.12);
 }
 
 .chip {
