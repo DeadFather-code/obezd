@@ -15,7 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
-  <link rel="stylesheet" href="css/app.css?v=2.10.2">
+  <link rel="stylesheet" href="css/app.css?v=2.11.0">
 </head>
 <body>
 
@@ -193,6 +193,20 @@
 
   <!-- ================= МАРШРУТЫ ================= -->
   <section id="screen-routes" class="screen screen-scroll" aria-label="Маршруты">
+    <header class="screen-head routes-head">
+      <div>
+        <h1>Маршруты</h1>
+        <p>Добавляйте населённые пункты и удаляйте лишние.</p>
+      </div>
+      <div class="routes-head-actions">
+        <button id="routes-edit-toggle" class="icon-btn" type="button" aria-label="Редактировать список маршрутов" aria-pressed="false" title="Редактировать">
+          <svg class="icon"><use href="#i-pencil"/></svg>
+        </button>
+        <button id="routes-add" class="icon-btn" type="button" aria-label="Добавить маршрут" title="Добавить маршрут">
+          <svg class="icon"><use href="#i-plus"/></svg>
+        </button>
+      </div>
+    </header>
     <div id="routes-list" class="routes-list"></div>
   </section>
 
@@ -357,7 +371,7 @@
           <div class="card-icon icon-slate"><svg class="icon"><use href="#i-store"/></svg></div>
           <div>
             <h2>Об приложении</h2>
-            <p>Версия <span id="app-version">2.10.2</span></p>
+            <p>Версия <span id="app-version">2.11.0</span></p>
           </div>
         </div>
         <p class="fine">Зелёный кружок — магазин пора посетить. Красный — визит отмечен, идёт таймер. Нажмите на кружок, чтобы открыть карточку, и отметьте визит кнопкой «Отметить визит».</p>
@@ -556,6 +570,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-<script src="js/app.js?v=2.10.2" defer></script>
+<script src="js/app.js?v=2.11.0" defer></script>
 </body>
 </html>

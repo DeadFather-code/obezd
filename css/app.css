@@ -1961,6 +1961,62 @@ b, strong {
   gap: 10px;
 }
 
+.routes-head {
+  align-items: center;
+}
+
+.routes-head-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.routes-head-actions .icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.routes-head-actions .icon-btn.active {
+  color: var(--blue);
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.route-card-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.route-delete {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: none;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: var(--red-text);
+}
+
+.routes-list.editing .route-delete {
+  display: inline-grid;
+}
+
+.routes-list.editing .route-badge {
+  display: none;
+}
+
+.routes-list.editing .route-card {
+  padding-right: 56px;
+}
+
 .route-card {
   width: 100%;
   text-align: left;
