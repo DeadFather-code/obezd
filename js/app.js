@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.11.1';
+const APP_VERSION = '2.11.2';
 const DEFAULT_CITY = 'orel';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
@@ -4933,7 +4933,31 @@ function applyCloud(data) {
   return changed;
 }
 
+function migrateCityAssignments() {
+  let changed = false;
+  const now = Date.now();
+  for (const rec of Object.values(state.custom)) {
+    if (!rec || rec.route) continue;
+    const lat = toNumber(rec.lat);
+    const lon = toNumber(rec.lon);
+    if (!isValidCoord(lat, lon)) continue;
+    const byCoords = cityIdForCoords(lat, lon);
+    /* Возвращаем в правильный город только точки, которые по координатам
+       точно попадают в Брянск или Железногорск, а записаны как орловские. */
+    if (!byCoords || byCoords === DEFAULT_CITY || rec.city === byCoords) continue;
+    rec.city = byCoords;
+    rec.upd = now;
+    changed = true;
+  }
+  if (changed) {
+    saveLocal();
+    localDirty = true;
+  }
+  return changed;
+}
+
 function afterCloudApply() {
+  migrateCityAssignments();
   rebuildStoreCache();
   if (map) renderMapMarkers();
   renderCounts();
@@ -5915,8 +5939,11 @@ async function switchCity(cityId) {
 
 
 async function bootstrap() {
-  loadLocal();
+  /* Города нужны до чтения localStorage: иначе city у точек и планы
+     Брянска/Железногорска не проходят проверку и сбрасываются в Орёл. */
   await loadCities();
+  loadLocal();
+  migrateCityAssignments();
   await loadCityStoreCounts();
   currentCity = cityById(uiPrefs.city || citiesConfig.default);
   uiPrefs.city = currentCity.id;

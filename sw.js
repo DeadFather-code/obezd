@@ -1,5 +1,5 @@
 /* Service worker: офлайн-оболочка приложения */
-const CACHE_NAME = 'obezd-88a80d3373';
+const CACHE_NAME = 'obezd-920ed0cf83';
 
 function lod1Paths(dir) {
   const paths = [];
