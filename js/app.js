@@ -6,7 +6,7 @@
    ============================================================ */
 
 const GROUP_ID = 'oryol-main';
-const APP_VERSION = '2.11.2';
+const APP_VERSION = '2.11.3';
 const DEFAULT_CITY = 'orel';
 const STORAGE_KEY = 'obezd_state_v2';
 const SETTINGS_KEY = 'obezd_ui_v1';
@@ -3578,13 +3578,49 @@ function routeVisitedSummary(name) {
   return { stores, counts, visited };
 }
 
+function routeLastVisit(stores) {
+  let last = 0;
+  for (const store of stores) {
+    const at = visitTime(store.id);
+    if (at && at > last) last = at;
+  }
+  return last;
+}
+
+/* Ближайший срок объезда маршрута: самый «горящий» магазин.
+   Для малых маршрутов это важнее процента завершения. */
+function routeNextVisit(stores) {
+  let soonest = null;
+  let overdue = 0;
+  let unvisited = false;
+  let progress = 0;
+  for (const store of stores) {
+    const status = getStatus(store);
+    progress = Math.max(progress, status.progress);
+    if (status.due) {
+      if (!status.at) { unvisited = true; continue; }
+      overdue = Math.max(overdue, status.daysAgo - status.period);
+    } else if (!soonest || status.daysLeft < soonest.daysLeft) {
+      soonest = status;
+    }
+  }
+  if (overdue > 0) {
+    return { due: true, daysLeft: 0, progress: 1, text: 'Просрочено на ' + overdue + ' ' + daysWord(overdue) };
+  }
+  if (unvisited || !soonest) return { due: true, daysLeft: 0, progress: 1, text: 'Пора объезжать' };
+  return {
+    due: false,
+    daysLeft: soonest.daysLeft,
+    progress: Math.min(1, Math.max(0, progress)),
+    text: 'До объезда ' + soonest.daysLeft + ' ' + daysWord(soonest.daysLeft)
+  };
+}
+
 /* --------------------------- Маршруты --------------------------- */
 
 function routeCardHtml(name, stores, counts) {
   const isMain = !!cityByRouteName(name);
   const isEmpty = stores.length === 0;
-  const badgeClass = isEmpty ? 'route-badge empty' : (counts.due ? 'route-badge' : 'route-badge ok');
-  const badgeText = isEmpty ? 'пусто' : (counts.due ? counts.due + ' пора' : 'всё в норме');
   const progress = stores.length ? Math.round((counts.ok / stores.length) * 100) : 0;
 
   let lastVisit = 0;
@@ -3597,8 +3633,58 @@ function routeCardHtml(name, stores, counts) {
     }
   }
 
+  const icon = isMain
+    ? '<svg class="icon route-card-icon"><use href="#i-map"/></svg>'
+    : '';
+
+  const deleteBtn = isMain ? '' :
+    '<button class="route-delete" type="button" data-action="delete-route" data-route="' + escapeHtml(name) + '" aria-label="Удалить маршрут ' + escapeHtml(name) + '">' +
+      '<svg class="icon"><use href="#i-trash"/></svg>' +
+    '</button>';
+
+  const head = (badgeClass, badgeText) =>
+    '<div class="route-card-head">' +
+      '<div class="route-card-name">' + icon + escapeHtml(name) + '</div>' +
+      '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' +
+    '</div>';
+
+  const meta = metaRight =>
+    '<div class="route-meta">' +
+      '<span>' + stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + '</span>' +
+      '<span class="sep"></span>' +
+      '<span>' + escapeHtml(metaRight) + '</span>' +
+    '</div>';
+
+  if (!isMain) {
+    /* Малый маршрут: плитка в половину ширины большой карточки.
+       Прогресс показывает приближение следующего объезда. */
+    const next = routeNextVisit(stores);
+    const nextText = isEmpty ? 'Добавьте магазины вручную' : next.text;
+    const nextProgress = Math.round((isEmpty ? 0 : next.progress) * 100);
+    const emptyBadge = isEmpty ? '<span class="route-badge empty">пусто</span>' : '';
+
+    return '<div class="route-card-wrap">' +
+      '<button class="route-card route-card-small' + (next.due && !isEmpty ? ' has-due' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
+      '<div class="route-card-head">' +
+        '<div class="route-card-name">' + escapeHtml(name) + '</div>' +
+        emptyBadge +
+      '</div>' +
+      meta('срок ' + storePeriod(stores[0] || { period: null }) + ' дн.') +
+      '<div class="route-progress"><i style="width:' + nextProgress + '%"></i></div>' +
+      '<div class="route-foot route-next-row">' +
+        '<span class="route-next' + (next.due && !isEmpty ? ' is-due' : '') + '">' + escapeHtml(nextText) + '</span>' +
+        '<svg class="icon"><use href="#i-chevron"/></svg>' +
+      '</div>' +
+      '</button>' +
+      deleteBtn +
+    '</div>';
+  }
+
+  const badgeClass = isEmpty ? 'route-badge empty' : (counts.due ? 'route-badge' : 'route-badge ok');
+  const badgeText = isEmpty ? 'пусто' : (counts.due ? counts.due + ' пора' : 'всё в норме');
+
   let footLeft;
-  if (isEmpty) footLeft = isMain ? 'На карте пока нет магазинов' : 'Добавьте магазины вручную';
+  if (isEmpty) footLeft = 'На карте пока нет магазинов';
   else if (counts.due) footLeft = counts.due + ' ' + plural(counts.due, 'магазин ждёт', 'магазина ждут', 'магазинов ждут') + ' визита';
   else if (lastVisit) {
     footLeft = 'Последний визит ' + formatDate(lastVisit) + ' · ' +
@@ -3610,29 +3696,10 @@ function routeCardHtml(name, stores, counts) {
         escapeHtml(lastStore ? visitAuthor(lastStore.id) || 'автор не указан' : 'автор не указан') + '</div>'
     : '';
 
-  const icon = isMain
-    ? '<svg class="icon route-card-icon"><use href="#i-map"/></svg>'
-    : '';
-  const metaRight = isMain
-    ? 'все точки на карте'
-    : 'срок ' + storePeriod(stores[0] || { period: null }) + ' дн.';
-
-  const deleteBtn = isMain ? '' :
-    '<button class="route-delete" type="button" data-action="delete-route" data-route="' + escapeHtml(name) + '" aria-label="Удалить маршрут ' + escapeHtml(name) + '">' +
-      '<svg class="icon"><use href="#i-trash"/></svg>' +
-    '</button>';
-
   return '<div class="route-card-wrap">' +
-    '<button class="route-card' + (counts.due ? ' has-due' : '') + (isMain ? ' route-card-oryol' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
-    '<div class="route-card-head">' +
-      '<div class="route-card-name">' + icon + escapeHtml(name) + '</div>' +
-      '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' +
-    '</div>' +
-    '<div class="route-meta">' +
-      '<span>' + stores.length + ' ' + plural(stores.length, 'магазин', 'магазина', 'магазинов') + '</span>' +
-      '<span class="sep"></span>' +
-      '<span>' + escapeHtml(metaRight) + '</span>' +
-    '</div>' +
+    '<button class="route-card route-card-oryol' + (counts.due ? ' has-due' : '') + '" type="button" data-route="' + escapeHtml(name) + '">' +
+    head(badgeClass, badgeText) +
+    meta('все точки на карте') +
     '<div class="route-progress"><i style="width:' + progress + '%"></i></div>' +
     lastVisitLine +
     '<div class="route-foot">' +
@@ -3640,7 +3707,6 @@ function routeCardHtml(name, stores, counts) {
       '<span class="route-foot-right">Открыть <svg class="icon"><use href="#i-chevron"/></svg></span>' +
     '</div>' +
     '</button>' +
-    deleteBtn +
   '</div>';
 }
 
@@ -3649,6 +3715,7 @@ function renderRoutesList() {
   if (!list) return;
 
   let html = '';
+  const smallRoutes = [];
 
   for (const city of cityList()) {
     if (!city) continue;
@@ -3660,7 +3727,27 @@ function renderRoutesList() {
   for (const name of routeNames()) {
     if (isMainRouteName(name)) continue;
     const summary = routeVisitedSummary(name);
-    html += routeCardHtml(name, summary.stores, summary.counts);
+    smallRoutes.push({
+      name,
+      summary,
+      done: summary.stores.length > 0 && summary.counts.due === 0,
+      last: routeLastVisit(summary.stores)
+    });
+  }
+
+  /* Завершённые маршруты (все магазины в норме) уходят в конец списка.
+     Среди них последним показываем тот, где визит был совсем недавно. */
+  const done = smallRoutes.filter(item => item.done)
+    .sort((a, b) => a.last - b.last);
+  const ordered = smallRoutes.filter(item => !item.done).concat(done);
+
+  /* Малые маршруты идут сеткой по две плитки в ряд под большими. */
+  if (ordered.length) {
+    html += '<div class="routes-small-grid">';
+    for (const item of ordered) {
+      html += routeCardHtml(item.name, item.summary.stores, item.summary.counts);
+    }
+    html += '</div>';
   }
 
   list.innerHTML = html;

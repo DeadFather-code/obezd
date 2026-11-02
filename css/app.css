@@ -2064,6 +2064,97 @@ b, strong {
   background: linear-gradient(160deg, rgba(22, 44, 40, 0.96), rgba(19, 30, 48, 0.96));
 }
 
+/* Малые маршруты: две плитки в ряд под большими карточками. */
+.routes-small-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.route-card-small {
+  display: flex;
+  flex-direction: column;
+  min-height: 139px;
+  padding: 13px 14px 12px;
+  border-radius: 14px;
+}
+
+.route-card-small .route-card-head {
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.route-card-small .route-card-name {
+  font-size: 15px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.route-card-small .route-badge {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+.route-card-small .route-meta {
+  margin-top: 5px;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-card-small .route-progress {
+  height: 5px;
+  margin-top: auto;
+}
+
+.route-card-small .route-foot {
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.route-card-small .route-foot .icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+.route-card-small .route-next {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.route-card-small .route-next.is-due {
+  color: #fbbf24;
+}
+
+/* На широком экране большие карточки занимают половину списка,
+   поэтому малые делаем вчетверо уже — ровно половина большой плитки. */
+@media (min-width: 620px) {
+  .routes-small-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Просроченные малые маршруты: красная штрихованная полоса,
+   чтобы не путать с янтарными полосами больших маршрутов. */
+.route-card-small.has-due {
+  border-color: rgba(239, 68, 68, 0.38);
+}
+
+.routes-list .route-card-small.has-due .route-progress {
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.routes-list .route-card-small.has-due .route-progress i {
+  background: repeating-linear-gradient(45deg, #fca5a5 0 5px, #ef4444 5px 10px);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.45);
+}
+
 .route-badge {
   flex: 0 0 auto;
   display: inline-flex;
